@@ -27,6 +27,12 @@ if [[ ! -f "$WEB_DIR/package.json" ]]; then
   echo "Error: $WEB_DIR/package.json not found."
   exit 1
 fi
+if [[ ! -f "$WEB_DIR/.env.local" ]]; then
+  echo "Error: $WEB_DIR/.env.local 不存在。"
+  echo "请执行: cd $WEB_DIR && cp .env.local.example .env.local"
+  echo "然后编辑 .env.local，至少设置 ADMIN_USERNAME 与 ADMIN_PASSWORD（及 Supabase 等）。"
+  exit 1
+fi
 
 echo "==> [2/8] Update source code ($BRANCH)"
 git -C "$APP_ROOT" fetch origin
@@ -45,30 +51,15 @@ if [[ ! -f "$WEB_DIR/.next/standalone/server.js" ]]; then
   exit 1
 fi
 
-echo "==> [5/8] Restart PM2 (standalone, not next start)"
+echo "==> [5/8] Restart PM2 (standalone via ecosystem.config.cjs)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
 
 cd "$WEB_DIR"
-# Load .env.local into environment for Node (safe parser; supports spaces in values).
-if [[ -f ".env.local" ]]; then
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # Skip blanks/comments
-    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
-    # Must be KEY=VALUE
-    [[ "$line" != *"="* ]] && continue
-    key="${line%%=*}"
-    value="${line#*=}"
-    # Trim CR if file edited on Windows
-    value="${value%$'\r'}"
-    # Export literally, keep spaces/symbols in value
-    export "$key=$value"
-  done < ".env.local"
-fi
-
+export PM2_NAME
 export HOSTNAME="${HOSTNAME:-0.0.0.0}"
 export PORT="$APP_PORT"
 
-pm2 start "node .next/standalone/server.js" --name "$PM2_NAME" --cwd "$WEB_DIR"
+pm2 start ecosystem.config.cjs
 
 echo "==> [6/8] Save PM2 process list"
 pm2 save
