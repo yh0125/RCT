@@ -46,9 +46,10 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 NEXT_PUBLIC_TARGET_ENROLLMENT=100
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ChangeMe123!
+ADMIN_SESSION_TOKEN=replace-with-a-random-long-string
 ```
 
-其中 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 用于保护管理后台与敏感接口访问（浏览器会弹出账号密码框）。
+其中 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 用于后台登录页 `/admin-login` 认证，登录成功后通过 Cookie 会话访问后台和敏感接口。
 当前受保护路径：
 - `/admin/*`
 - `/api/export/*`
