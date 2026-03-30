@@ -63,14 +63,12 @@ const GROUP_CONFIG: Record<string, { label: string; color: string; bg: string; r
 
 const MODALITIES = ["CT", "MRI", "X-ray", "超声"];
 
-const SITE_URL =
-  typeof window !== "undefined"
-    ? process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
-    : "";
-
 // ─── Admin Dashboard ────────────────────────────────────
 
 export default function AdminPage() {
+  /** 患者扫码入口：默认用构建时的 NEXT_PUBLIC_SITE_URL；设 NEXT_PUBLIC_PATIENT_QR_USE_ORIGIN=1 则用当前浏览器 origin（备案期用 IP 打开后台时二维码即 IP） */
+  const [patientPortalBase, setPatientPortalBase] = useState("");
+
   const [stats, setStats] = useState<Stats | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +79,18 @@ export default function AdminPage() {
   const [showDemoEditor, setShowDemoEditor] = useState(false);
   const [showNotifyEditor, setShowNotifyEditor] = useState(false);
   const [showStudyQR, setShowStudyQR] = useState(false);
+
+  useEffect(() => {
+    const useOriginOnly =
+      process.env.NEXT_PUBLIC_PATIENT_QR_USE_ORIGIN === "1" ||
+      process.env.NEXT_PUBLIC_PATIENT_QR_USE_ORIGIN === "true";
+    if (useOriginOnly) {
+      setPatientPortalBase(window.location.origin);
+      return;
+    }
+    const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+    setPatientPortalBase(fromEnv || window.location.origin);
+  }, []);
 
   // ─── Data Fetching ──────────────────────────────────
 
@@ -301,10 +311,24 @@ export default function AdminPage() {
               </h2>
               <p className="mb-3 text-xs text-gray-500">患者扫描此二维码进行自助登记和查看报告</p>
               <div className="flex justify-center rounded-lg border border-gray-200 bg-white p-4">
-                <QRCodeSVG value={`${SITE_URL}/p`} size={180} />
+                {patientPortalBase ? (
+                  <QRCodeSVG value={`${patientPortalBase}/p`} size={180} />
+                ) : (
+                  <div className="flex h-[180px] w-[180px] items-center justify-center text-xs text-gray-400">
+                    加载中…
+                  </div>
+                )}
               </div>
               <p className="mt-2 text-center font-mono text-xs text-gray-400 break-all">
-                {SITE_URL}/p
+                {patientPortalBase ? `${patientPortalBase}/p` : "—"}
+              </p>
+              <p className="mt-1 text-center text-[10px] leading-relaxed text-gray-400">
+                链接来自环境变量{" "}
+                <span className="font-mono">NEXT_PUBLIC_SITE_URL</span>
+                （构建时写入）。若显示旧域名，请改{" "}
+                <span className="font-mono">.env.local</span> 后重新部署；或设{" "}
+                <span className="font-mono">NEXT_PUBLIC_PATIENT_QR_USE_ORIGIN=1</span>{" "}
+                使二维码与当前访问地址一致。
               </p>
             </div>
 

@@ -44,6 +44,7 @@
    sudo bash scripts/update_server.sh
 
 脚本会自动根据「脚本所在位置」找到仓库根目录和 web 目录，不必一定是 /opt/rct-ai。
+- Next standalone：build 后必须把 `.next/static` 同步到 `.next/standalone/.next/static`，否则浏览器里 `/_next/static/*.js` 会 404、登录页 JS 不跑、Cookie 也存不上；`update_server.sh` 已包含该步骤。
 
 
 三、本机检查是否起来

@@ -68,6 +68,16 @@ if [[ ! -f "$WEB_DIR/.next/standalone/server.js" ]]; then
   exit 1
 fi
 
+echo "==> [4b/8] Sync static into standalone (否则浏览器请求 /_next/static/* 会 404，页面 JS 不执行)"
+STAND="$WEB_DIR/.next/standalone"
+mkdir -p "$STAND/.next"
+rm -rf "$STAND/.next/static"
+cp -r "$WEB_DIR/.next/static" "$STAND/.next/static"
+if [[ -d "$WEB_DIR/public" ]]; then
+  rm -rf "$STAND/public"
+  cp -r "$WEB_DIR/public" "$STAND/public"
+fi
+
 echo "==> [5/8] Restart PM2 (standalone via ecosystem.config.cjs)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
 sleep 2
