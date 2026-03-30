@@ -49,12 +49,20 @@ echo "==> [5/8] Restart PM2 (standalone, not next start)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
 
 cd "$WEB_DIR"
-# Load .env.local into environment for Node (ADMIN_*, NEXT_PUBLIC_*, etc.)
+# Load .env.local into environment for Node (safe parser; supports spaces in values).
 if [[ -f ".env.local" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ".env.local" || true
-  set +a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Skip blanks/comments
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    # Must be KEY=VALUE
+    [[ "$line" != *"="* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Trim CR if file edited on Windows
+    value="${value%$'\r'}"
+    # Export literally, keep spaces/symbols in value
+    export "$key=$value"
+  done < ".env.local"
 fi
 
 export HOSTNAME="${HOSTNAME:-0.0.0.0}"
