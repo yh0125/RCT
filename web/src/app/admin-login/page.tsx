@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Lock, LogIn, Loader2 } from "lucide-react";
 
 export default function AdminLoginPage() {
@@ -8,6 +8,13 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // 仅支持 ?username= 预填账号；密码必须手输或浏览器保存，勿用 URL 传密码（会进日志与历史记录）
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const u = q.get("username")?.trim();
+    if (u) setUsername(u);
+  }, []);
 
   const handleLogin = async (u: string, p: string) => {
     if (!u.trim() || !p) return;
@@ -17,15 +24,22 @@ export default function AdminLoginPage() {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ username: u.trim(), password: p }),
       });
-      const data = await res.json();
+      let data: { error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError("服务器响应异常，请重试");
+        return;
+      }
       if (!res.ok) {
         setError(data.error || "登录失败");
         return;
       }
-      // Use hard navigation to avoid cookie sync issues on some mobile/webview browsers.
-      window.location.href = "/admin";
+      // 整页跳转，避免部分环境下 Cookie 未参与后续请求
+      window.location.replace("/admin");
     } catch {
       setError("网络错误，请重试");
     } finally {
