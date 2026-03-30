@@ -23,6 +23,7 @@ import {
   ClipboardEdit,
   QrCode,
   Eye,
+  LogOut,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────
@@ -181,6 +182,14 @@ export default function AdminPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/admin-login";
+    }
+  };
+
   // ─── Render ─────────────────────────────────────────
 
   const progress = stats ? Math.round((stats.total / stats.target) * 100) : 0;
@@ -220,6 +229,10 @@ export default function AdminPage() {
               <button onClick={handleExport} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
                 <Download size={16} />
                 导出 CSV
+              </button>
+              <button onClick={handleLogout} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <LogOut size={16} />
+                退出
               </button>
             </div>
           </div>
