@@ -778,14 +778,14 @@ function DemoFieldInput({
       {field.type === "radio" && (
         <div className="flex gap-3">
           {(field.options ?? []).map((opt) => (
-            <button key={opt} onClick={() => onChange(opt)} className={`flex-1 ${btnBase} ${value === opt ? btnActive : btnInactive}`}>{opt}</button>
+            <button key={opt} onClick={() => onChange(opt)} className={`min-w-0 break-words text-left leading-tight flex-1 ${btnBase} ${value === opt ? btnActive : btnInactive}`}>{opt}</button>
           ))}
         </div>
       )}
       {field.type === "select" && (
         <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${field.columns ?? 2}, 1fr)` }}>
           {(field.options ?? []).map((opt) => (
-            <button key={opt} onClick={() => onChange(opt)} className={`${btnBase} ${value === opt ? btnActive : btnInactive}`}>{opt}</button>
+            <button key={opt} onClick={() => onChange(opt)} className={`min-w-0 break-words text-left leading-tight ${btnBase} ${value === opt ? btnActive : btnInactive}`}>{opt}</button>
           ))}
         </div>
       )}

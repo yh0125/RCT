@@ -189,37 +189,39 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white">
               <ClipboardList size={20} />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900">RCT-AI 管理后台</h1>
-              <p className="text-xs text-gray-500">AI辅助放射学报告可视化 · 随机对照试验</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-semibold text-gray-900">RCT-AI 管理后台</h1>
+              <p className="truncate text-xs text-gray-500">AI辅助放射学报告可视化 · 随机对照试验</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => setShowDemoEditor(true)} className="btn-secondary gap-1.5">
-              <ClipboardEdit size={16} />
-              信息采集
-            </button>
-            <button onClick={() => setShowQuestionEditor(true)} className="btn-secondary gap-1.5">
-              <ListChecks size={16} />
-              问卷
-            </button>
-            <button onClick={() => setShowPromptEditor(true)} className="btn-secondary gap-1.5">
-              <Settings size={16} />
-              提示词
-            </button>
-            <button onClick={fetchData} className="btn-secondary gap-1.5" disabled={loading}>
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-              刷新
-            </button>
-            <button onClick={handleExport} className="btn-secondary gap-1.5">
-              <Download size={16} />
-              导出 CSV
-            </button>
+          <div className="w-full overflow-x-auto lg:w-auto lg:overflow-visible">
+            <div className="flex w-max gap-2">
+              <button onClick={() => setShowDemoEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <ClipboardEdit size={16} />
+                信息采集
+              </button>
+              <button onClick={() => setShowQuestionEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <ListChecks size={16} />
+                问卷
+              </button>
+              <button onClick={() => setShowPromptEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <Settings size={16} />
+                提示词
+              </button>
+              <button onClick={fetchData} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm" disabled={loading}>
+                <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                刷新
+              </button>
+              <button onClick={handleExport} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <Download size={16} />
+                导出 CSV
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -326,7 +328,7 @@ export default function AdminPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-[760px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                       <th className="px-3 py-2">编号</th>
