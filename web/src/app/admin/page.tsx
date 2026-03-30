@@ -79,6 +79,7 @@ export default function AdminPage() {
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
   const [showDemoEditor, setShowDemoEditor] = useState(false);
+  const [showNotifyEditor, setShowNotifyEditor] = useState(false);
   const [showStudyQR, setShowStudyQR] = useState(false);
 
   // ─── Data Fetching ──────────────────────────────────
@@ -221,6 +222,10 @@ export default function AdminPage() {
               <button onClick={() => setShowPromptEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
                 <Settings size={16} />
                 提示词
+              </button>
+              <button onClick={() => setShowNotifyEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <Settings size={16} />
+                邮件通知
               </button>
               <button onClick={fetchData} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm" disabled={loading}>
                 <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
@@ -458,6 +463,10 @@ export default function AdminPage() {
       {/* Demographic Fields Editor Dialog */}
       {showDemoEditor && (
         <DemoFieldEditorDialog onClose={() => setShowDemoEditor(false)} />
+      )}
+
+      {showNotifyEditor && (
+        <EnrollmentNotifyDialog onClose={() => setShowNotifyEditor(false)} />
       )}
     </div>
   );
@@ -1582,6 +1591,116 @@ function PromptEditorDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EnrollmentNotifyDialog({ onClose }: { onClose: () => void }) {
+  const [enabled, setEnabled] = useState(false);
+  const [recipientsText, setRecipientsText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/prompts");
+        const data = await res.json();
+        const raw = data.prompts?.enrollment_email_config?.value;
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setEnabled(Boolean(parsed?.enabled));
+          if (Array.isArray(parsed?.recipients)) {
+            setRecipientsText(parsed.recipients.join("\n"));
+          }
+        }
+      } catch {
+        // ignore and use defaults
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMsg("");
+    const recipients = recipientsText
+      .split(/\r?\n|,/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const payload = JSON.stringify({ enabled, recipients }, null, 2);
+    try {
+      const res = await fetch("/api/prompts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "enrollment_email_config", value: payload }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        setMsg(`保存失败：${err.error || "未知错误"}`);
+      } else {
+        setMsg("保存成功");
+      }
+    } catch {
+      setMsg("网络错误，请重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <button
+          onClick={onClose}
+          className="absolute right-3 top-3 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        >
+          <X size={20} />
+        </button>
+        <h3 className="mb-1 text-lg font-semibold text-gray-900">登记邮件通知</h3>
+        <p className="mb-4 text-xs text-gray-500">
+          患者首次登记成功后，可自动发送邮件提醒。需在服务器配置 `RESEND_API_KEY` 和 `EMAIL_FROM`。
+        </p>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-gray-500">加载中...</div>
+        ) : (
+          <>
+            <label className="mb-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <span className="text-sm font-medium text-gray-700">启用邮件通知</span>
+            </label>
+
+            <label className="mb-1 block text-sm font-medium text-gray-700">收件人邮箱（每行一个，或逗号分隔）</label>
+            <textarea
+              className="input-field min-h-[150px] resize-y"
+              placeholder={"a@example.com\nb@example.com"}
+              value={recipientsText}
+              onChange={(e) => setRecipientsText(e.target.value)}
+              disabled={saving}
+            />
+
+            {msg && <p className={`mt-2 text-sm ${msg.includes("成功") ? "text-emerald-600" : "text-red-600"}`}>{msg}</p>}
+
+            <div className="mt-4 flex gap-2">
+              <button onClick={onClose} className="btn-secondary flex-1" disabled={saving}>
+                关闭
+              </button>
+              <button onClick={handleSave} className="btn-primary flex-1 gap-2" disabled={saving}>
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                保存
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

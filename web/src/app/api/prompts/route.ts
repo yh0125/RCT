@@ -11,6 +11,7 @@ const VALID_KEYS = [
   "image_final_prefix",
   "questionnaire_questions",
   "demographic_fields",
+  "enrollment_email_config",
 ];
 
 export async function GET() {

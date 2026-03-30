@@ -58,6 +58,18 @@ ADMIN_SESSION_TOKEN=replace-with-a-random-long-string
 - `/api/interpret/*`
 - `/api/patients/*` 的 `PATCH/DELETE` 管理操作
 
+### 入组邮件通知（可选）
+
+后台可在“邮件通知”里配置：
+- 是否开启通知
+- 发给哪些邮箱（支持多个）
+
+患者首次登记成功后会自动触发通知邮件。需配置环境变量：
+```
+RESEND_API_KEY=re_xxxxx
+EMAIL_FROM=RCT-AI <notify@yourdomain.com>
+```
+
 ### 4. 生成随机化序列
 
 ```bash
