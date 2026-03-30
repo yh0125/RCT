@@ -67,16 +67,13 @@ if [[ ! -f "$WEB_DIR/.next/standalone/server.js" ]]; then
   echo "Error: standalone build missing at .next/standalone/server.js"
   exit 1
 fi
-
-echo "==> [4b/8] Sync static into standalone (否则浏览器请求 /_next/static/* 会 404，页面 JS 不执行)"
-STAND="$WEB_DIR/.next/standalone"
-mkdir -p "$STAND/.next"
-rm -rf "$STAND/.next/static"
-cp -r "$WEB_DIR/.next/static" "$STAND/.next/static"
-if [[ -d "$WEB_DIR/public" ]]; then
-  rm -rf "$STAND/public"
-  cp -r "$WEB_DIR/public" "$STAND/public"
+if [[ ! -d "$WEB_DIR/.next/static" ]]; then
+  echo "Error: .next/static missing after build (Next output incomplete)"
+  exit 1
 fi
+
+echo "==> [4b/8] Sync static into standalone（每次更新必做，否则 /_next/static 404）"
+bash "$WEB_DIR/scripts/sync-standalone-assets.sh"
 
 echo "==> [5/8] Restart PM2 (standalone via ecosystem.config.cjs)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
@@ -105,6 +102,17 @@ if ! curl -fsS "http://127.0.0.1:${APP_PORT}" >/dev/null; then
   echo "Health check failed. Recent logs:"
   pm2 logs "$PM2_NAME" --lines 40 --nostream || true
   exit 1
+fi
+# 抽查一个真实静态文件，避免 HTML 能打开但 chunk 全 404
+SAMPLE=$(find "$WEB_DIR/.next/standalone/.next/static" -type f 2>/dev/null | head -1)
+if [[ -n "$SAMPLE" ]]; then
+  PREFIX="$WEB_DIR/.next/standalone/.next/static/"
+  REST="${SAMPLE#"$PREFIX"}"
+  REL="/_next/static/$REST"
+  CODE=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${APP_PORT}${REL}" || true)
+  if [[ "$CODE" != "200" ]]; then
+    echo "Warning: static probe $REL -> HTTP $CODE (请执行: bash $WEB_DIR/scripts/sync-standalone-assets.sh && pm2 restart $PM2_NAME)"
+  fi
 fi
 
 echo "==> [8/8] Done"
