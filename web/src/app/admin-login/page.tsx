@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Lock, LogIn, Loader2 } from "lucide-react";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,8 +24,8 @@ export default function AdminLoginPage() {
         setError(data.error || "登录失败");
         return;
       }
-      router.replace("/admin");
-      router.refresh();
+      // Use hard navigation to avoid cookie sync issues on some mobile/webview browsers.
+      window.location.href = "/admin";
     } catch {
       setError("网络错误，请重试");
     } finally {
