@@ -32,6 +32,10 @@ export async function GET() {
 
   const headers = [
     "patient_code",
+    "registration_id",
+    "exam_date",
+    "education",
+    "health_status",
     "age",
     "gender",
     "disease_type",
@@ -47,6 +51,10 @@ export async function GET() {
     const resp = responseMap.get(p.id) ?? {};
     return [
       p.patient_code,
+      p.registration_id,
+      p.exam_date,
+      p.education,
+      p.health_status,
       p.age,
       p.gender,
       p.disease_type,

@@ -44,7 +44,18 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 NEXT_PUBLIC_TARGET_ENROLLMENT=100
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=ChangeMe123!
 ```
+
+其中 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 用于保护管理后台与敏感接口访问（浏览器会弹出账号密码框）。
+当前受保护路径：
+- `/admin/*`
+- `/api/export/*`
+- `/api/prompts/*`
+- `/api/stats/*`
+- `/api/interpret/*`
+- `/api/patients/*` 的 `PATCH/DELETE` 管理操作
 
 ### 4. 生成随机化序列
 
