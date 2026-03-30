@@ -72,6 +72,12 @@ npm run build
 pm2 restart rct-ai-web
 ```
 
+Or run one command with the auto-update script:
+
+```bash
+sudo bash /opt/rct-ai/web/scripts/update_server.sh
+```
+
 ## 5. Troubleshooting
 
 - Nginx test:
