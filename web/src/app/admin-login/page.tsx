@@ -38,8 +38,7 @@ export default function AdminLoginPage() {
         setError(data.error || "登录失败");
         return;
       }
-      // 整页跳转，避免部分环境下 Cookie 未参与后续请求
-      window.location.replace("/admin");
+      window.location.replace(`${window.location.origin}/admin`);
     } catch {
       setError("网络错误，请重试");
     } finally {

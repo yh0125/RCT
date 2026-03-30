@@ -90,4 +90,46 @@
   部署脚本                  →  WEB_DIR/scripts/update_server.sh
   PM2 配置                  →  WEB_DIR/ecosystem.config.cjs
 
+
+七、域名 HTTPS 访问异常（能 curl 本机 3000，浏览器 yang0125.com 登录不行）
+--------------------------------------------------------------------------------
+多半是 Nginx 反代未传「真实协议/主机名」，导致 Cookie、重定向异常。请确认 server 块里至少有：
+
+   proxy_set_header Host              $host;
+   proxy_set_header X-Real-IP         $remote_addr;
+   proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+   proxy_set_header X-Forwarded-Proto $scheme;
+
+整段示例（SSL 证书路径请按实际修改）：
+
+   server {
+       listen 443 ssl;
+       server_name yang0125.com;
+       ssl_certificate     /path/to/fullchain.pem;
+       ssl_certificate_key /path/to/privkey.pem;
+
+       location / {
+           proxy_pass http://127.0.0.1:3000;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_read_timeout 300s;
+       }
+   }
+
+改完后：nginx -t && systemctl reload nginx
+
+服务器上自测（把域名换成你的）：
+
+   curl -sS -I https://yang0125.com/admin-login
+   curl -sS -i -X POST https://yang0125.com/api/admin/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"你的账号","password":"你的密码"}'
+
+第二行响应头里应有 Set-Cookie: admin_session=...；若 401 则是 .env.local 里账号密码与请求不一致。
+
 ================================================================================
