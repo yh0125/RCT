@@ -70,17 +70,19 @@ fi
 
 echo "==> [5/8] Restart PM2 (standalone via ecosystem.config.cjs)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
-sleep 1
+sleep 2
 # 若仍有非 PM2 进程占用端口（例如曾手动 node 启动），尝试释放
 if command -v fuser >/dev/null 2>&1; then
   fuser -k "${APP_PORT}/tcp" >/dev/null 2>&1 || true
-  sleep 1
+  sleep 2
 fi
 
 cd "$WEB_DIR"
+chmod +x scripts/start-standalone.sh 2>/dev/null || true
 export PM2_NAME
-export APP_BIND_HOST="${APP_BIND_HOST:-0.0.0.0}"
 export PORT="$APP_PORT"
+# 避免 PM2 守护进程把本机 HOSTNAME 合并进子进程，覆盖 ecosystem 里为 Next 设的监听地址
+unset HOSTNAME
 
 pm2 start ecosystem.config.cjs
 

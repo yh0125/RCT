@@ -60,12 +60,19 @@
 
 四、若 PM2 报 EADDRINUSE / 健康检查连不上 3000
 --------------------------------------------------------------------------------
-多半是端口被旧进程占用，或系统自带 HOSTNAME=机器名 导致监听异常（脚本与 ecosystem 已默认绑定 0.0.0.0）。
+常见原因：① 端口仍被旧进程占用；② Linux 系统变量 HOSTNAME=机器名，Next 误监听 ::1。
+
+项目已用 scripts/start-standalone.sh 在启动前强制 HOSTNAME=0.0.0.0；请先 git pull 最新代码再跑部署脚本。
 
 可先手动释放端口再部署：
 
    fuser -k 3000/tcp
-   sleep 1
+   sleep 2
+   sudo bash /opt/rct-ai/web/scripts/update_server.sh
+
+仍失败时可重启 PM2 守护进程后再启动应用：
+
+   pm2 kill
    sudo bash /opt/rct-ai/web/scripts/update_server.sh
 
 （路径按你的仓库改。）
