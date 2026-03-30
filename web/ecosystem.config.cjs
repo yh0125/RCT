@@ -35,8 +35,10 @@ module.exports = {
       env: {
         ...fileEnv,
         NODE_ENV: "production",
-        HOSTNAME: process.env.HOSTNAME || "0.0.0.0",
-        PORT: process.env.PORT || fileEnv.PORT || "3000",
+        // 禁止用系统环境里的 HOSTNAME（Linux 常为机器名），否则 Next 可能监听 ::1 并报 EADDRINUSE
+        HOSTNAME:
+          process.env.APP_BIND_HOST || fileEnv.APP_BIND_HOST || "0.0.0.0",
+        PORT: String(process.env.PORT || fileEnv.PORT || "3000"),
       },
     },
   ],

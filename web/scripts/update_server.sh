@@ -70,10 +70,16 @@ fi
 
 echo "==> [5/8] Restart PM2 (standalone via ecosystem.config.cjs)"
 pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
+sleep 1
+# 若仍有非 PM2 进程占用端口（例如曾手动 node 启动），尝试释放
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k "${APP_PORT}/tcp" >/dev/null 2>&1 || true
+  sleep 1
+fi
 
 cd "$WEB_DIR"
 export PM2_NAME
-export HOSTNAME="${HOSTNAME:-0.0.0.0}"
+export APP_BIND_HOST="${APP_BIND_HOST:-0.0.0.0}"
 export PORT="$APP_PORT"
 
 pm2 start ecosystem.config.cjs
