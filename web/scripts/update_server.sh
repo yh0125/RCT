@@ -2,21 +2,38 @@
 set -euo pipefail
 
 # RCT-AI server auto update script (Next.js output: standalone)
-# Usage:
-#   sudo bash /opt/rct-ai/web/scripts/update_server.sh
+# Usage (任选其一，注意当前目录):
+#   在仓库根目录 rct-ai/     : sudo bash web/scripts/update_server.sh
+#   已在 web/ 子目录里        : sudo bash scripts/update_server.sh
+#   绝对路径示例              : sudo bash /opt/rct-ai/web/scripts/update_server.sh
 #
-# Optional env vars:
-#   APP_ROOT=/opt/rct-ai
-#   WEB_DIR=/opt/rct-ai/web
+# Optional env vars（一般不用设；脚本会按自己所在位置自动找 web/ 和仓库根）:
+#   APP_ROOT=/path/to/rct-ai
+#   WEB_DIR=/path/to/rct-ai/web
 #   BRANCH=main
 #   PM2_NAME=rct-ai-web
 #   APP_PORT=3000
 
-APP_ROOT="${APP_ROOT:-/opt/rct-ai}"
-WEB_DIR="${WEB_DIR:-$APP_ROOT/web}"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DETECTED_WEB="$(cd "$_SCRIPT_DIR/.." && pwd)"
+_DETECTED_ROOT="$(cd "$_DETECTED_WEB/.." && pwd)"
+
+if [[ -n "${APP_ROOT:-}" && -n "${WEB_DIR:-}" ]]; then
+  :
+elif [[ -n "${APP_ROOT:-}" ]]; then
+  WEB_DIR="$APP_ROOT/web"
+elif [[ -n "${WEB_DIR:-}" ]]; then
+  APP_ROOT="$(cd "$WEB_DIR/.." && pwd)"
+else
+  APP_ROOT="$_DETECTED_ROOT"
+  WEB_DIR="$_DETECTED_WEB"
+fi
+
 BRANCH="${BRANCH:-main}"
 PM2_NAME="${PM2_NAME:-rct-ai-web}"
 APP_PORT="${APP_PORT:-3000}"
+
+echo "==> [0/8] Paths: APP_ROOT=$APP_ROOT  WEB_DIR=$WEB_DIR"
 
 echo "==> [1/8] Check paths"
 if [[ ! -d "$APP_ROOT/.git" ]]; then

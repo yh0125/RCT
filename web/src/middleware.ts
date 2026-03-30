@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = "admin_session";
 
 function getExpectedSessionToken() {
-  return (
+  const raw =
     process.env.ADMIN_SESSION_TOKEN ||
     process.env.ADMIN_PASSWORD ||
-    "ChangeMe123!"
-  );
+    "ChangeMe123!";
+  return String(raw).trim();
 }
 
 export function middleware(req: NextRequest) {
@@ -68,6 +68,9 @@ export const config = {
     "/api/interpret/:path*",
     "/api/patients/:path*",
     "/admin-login/:path*",
+    // 显式包含无后缀路径，避免部分环境下 :path* 未命中
+    "/api/admin/login",
+    "/api/admin/logout",
     "/api/admin/login/:path*",
     "/api/admin/logout/:path*",
   ],

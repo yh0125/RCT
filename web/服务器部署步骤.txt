@@ -1,0 +1,73 @@
+================================================================================
+  RCT-AI 网站（web）服务器部署 — 按顺序复制执行即可
+================================================================================
+
+一、第一次部署前：准备环境变量文件
+--------------------------------------------------------------------------------
+1. SSH 登录服务器。
+
+2. 进入 web 目录（把下面的路径改成你机器上真实路径，例如 /root/rct-ai/web）：
+
+   cd /opt/rct-ai/web
+
+3. 若没有 .env.local，从示例复制一份：
+
+   cp .env.local.example .env.local
+
+4. 用 vi 编辑（没有 nano 就用 vi）：
+
+   vi .env.local
+
+   按 i 进入编辑，改完按 Esc，输入 :wq 回车保存退出。
+
+   至少要改这几项：
+   - NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY（Supabase 控制台里复制）
+   - NEXT_PUBLIC_SITE_URL 改成你的域名，例如 https://yang0125.com
+   - ADMIN_USERNAME、ADMIN_PASSWORD（后台登录账号密码，自己设强密码）
+
+5. 若 vim 提示 .swp 交换文件：
+   - 没人同时在改这个文件时，按 D 删掉 swap；或退出后执行：
+     rm -f /opt/rct-ai/web/.env.local.swp
+   （路径按你的 web 目录改）
+
+
+二、一键更新并启动（推荐）
+--------------------------------------------------------------------------------
+在服务器上执行下面**整行**（路径改成你的 web 里 scripts 的真实位置）：
+
+   sudo bash /opt/rct-ai/web/scripts/update_server.sh
+
+说明：
+- 不要先 cd 进 web 再写 web/scripts/...（会多一层 web 报错）。
+- 若你已经在 web 目录里，则用：
+
+   sudo bash scripts/update_server.sh
+
+脚本会自动根据「脚本所在位置」找到仓库根目录和 web 目录，不必一定是 /opt/rct-ai。
+
+
+三、本机检查是否起来
+--------------------------------------------------------------------------------
+
+   curl -sS -I http://127.0.0.1:3000/
+
+   curl -sS -X POST http://127.0.0.1:3000/api/admin/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"你的ADMIN_USERNAME","password":"你的ADMIN_PASSWORD"}'
+
+第二行应返回含 "ok":true 的 JSON；若 401，说明 .env.local 里密码与 curl 不一致，或 PM2 未重启。
+
+
+四、改密码或改 .env.local 之后
+--------------------------------------------------------------------------------
+必须重新执行第二节的 update_server.sh（或至少：cd 到 web，npm run build，再 pm2 restart）。
+
+
+五、常用路径对照
+--------------------------------------------------------------------------------
+  仓库根目录（含 .git）     →  APP_ROOT，例如 /opt/rct-ai 或 /root/rct-ai
+  Next 项目目录             →  WEB_DIR，例如 .../rct-ai/web
+  部署脚本                  →  WEB_DIR/scripts/update_server.sh
+  PM2 配置                  →  WEB_DIR/ecosystem.config.cjs
+
+================================================================================

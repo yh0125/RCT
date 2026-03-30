@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = "admin_session";
 
 function getExpectedSessionToken() {
-  return (
+  const raw =
     process.env.ADMIN_SESSION_TOKEN ||
     process.env.ADMIN_PASSWORD ||
-    "ChangeMe123!"
-  );
+    "ChangeMe123!";
+  return String(raw).trim();
 }
 
 export async function POST(req: NextRequest) {
