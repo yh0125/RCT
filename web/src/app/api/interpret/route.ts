@@ -6,11 +6,32 @@ export const maxDuration = 300;
 
 const AI_API_URL = process.env.AI_API_URL;
 const AI_API_KEY = process.env.AI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || "gemini-3.1-flash-lite-preview";
+const AI_MODEL =
+  process.env.AI_MODEL || "gemini-3.1-flash-lite-preview-thinking-high";
 const AI_PROMPT_MODEL =
   process.env.AI_PROMPT_MODEL || "gemini-3.1-flash-lite-preview-thinking-high";
-const AI_IMAGE_MODEL = process.env.AI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
+const AI_IMAGE_MODEL =
+  process.env.AI_IMAGE_MODEL || "gemini-3.1-flash-image-preview-4k";
 const AI_IMAGE_REFERENCE_URL = process.env.AI_IMAGE_REFERENCE_URL || "";
+
+function envFlagTrue(value: string | undefined, defaultTrue: boolean): boolean {
+  if (value === undefined || value.trim() === "") return defaultTrue;
+  const v = value.trim().toLowerCase();
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+  return true;
+}
+
+const AI_ENABLE_IMAGE_GENERATION = envFlagTrue(
+  process.env.AI_ENABLE_IMAGE_GENERATION,
+  true
+);
+
+function imageGenerationsUrl(): string {
+  const explicit = process.env.AI_IMAGE_GENERATIONS_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  const base = AI_API_URL!.replace("/v1/chat/completions", "").replace(/\/$/, "");
+  return `${base}/v1/images/generations`;
+}
 
 // ─── Default Prompts (overridable via DB) ───────────
 
@@ -189,7 +210,7 @@ function stripMarkdownCodeFence(raw: string): string {
 }
 
 async function callImageAI(prefix: string, imagePrompt: string): Promise<string> {
-  const baseUrl = AI_API_URL!.replace("/v1/chat/completions", "");
+  const endpoint = imageGenerationsUrl();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 240000);
 
@@ -198,7 +219,7 @@ async function callImageAI(prefix: string, imagePrompt: string): Promise<string>
 
   try {
     // 1) Try workflow-compatible payload first (nano-banana style)
-    let res = await fetch(`${baseUrl}/v1/images/generations`, {
+    let res = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -220,7 +241,7 @@ async function callImageAI(prefix: string, imagePrompt: string): Promise<string>
 
     if (!res.ok) {
       // 2) Fallback to OpenAI-compatible payload
-      res = await fetch(`${baseUrl}/v1/images/generations`, {
+      res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -381,14 +402,20 @@ export async function POST(req: NextRequest) {
       console.log(`[C组] 图像 prompt (清理后): ${imagePrompt.substring(0, 200)}...`);
 
       if (imagePrompt && AI_IMAGE_MODEL) {
-        try {
-          const t2 = Date.now();
-          console.log(`[C组] Step 3/3: 图像生成 (${AI_IMAGE_MODEL})...`);
-          aiImageUrl = await callImageAI(P.image_final_prefix, imagePrompt);
-          console.log(`[C组] Step 3 完成 (${((Date.now() - t2) / 1000).toFixed(1)}s)`);
-        } catch (imgErr: unknown) {
-          console.error(`[C组] 图像生成失败 (${((Date.now() - t0) / 1000).toFixed(1)}s):`, imgErr);
-          aiImageUrl = "";
+        if (!AI_ENABLE_IMAGE_GENERATION) {
+          console.log(
+            "[C组] Step 3/3: 跳过图像生成（已设置 AI_ENABLE_IMAGE_GENERATION=0/false）"
+          );
+        } else {
+          try {
+            const t2 = Date.now();
+            console.log(`[C组] Step 3/3: 图像生成 (${AI_IMAGE_MODEL})...`);
+            aiImageUrl = await callImageAI(P.image_final_prefix, imagePrompt);
+            console.log(`[C组] Step 3 完成 (${((Date.now() - t2) / 1000).toFixed(1)}s)`);
+          } catch (imgErr: unknown) {
+            console.error(`[C组] 图像生成失败 (${((Date.now() - t0) / 1000).toFixed(1)}s):`, imgErr);
+            aiImageUrl = "";
+          }
         }
       }
 
