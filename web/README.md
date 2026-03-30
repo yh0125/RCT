@@ -55,8 +55,9 @@ ADMIN_SESSION_TOKEN=replace-with-a-random-long-string
 - `/api/export/*`
 - `/api/prompts/*`
 - `/api/stats/*`
-- `/api/interpret/*`
 - `/api/patients/*` 的 `PATCH/DELETE` 管理操作
+
+`/api/interpret`：`GET`（患者查看已生成的解读）公开；`POST`（后台生成解读）需管理员登录 Cookie。
 
 ### 入组邮件通知（可选）
 

@@ -7,9 +7,9 @@ export const maxDuration = 300;
 const AI_API_URL = process.env.AI_API_URL;
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_MODEL =
-  process.env.AI_MODEL || "gemini-3.1-flash-lite-preview-thinking-high";
+  process.env.AI_MODEL || "gemini-3.1-flash-lite-preview";
 const AI_PROMPT_MODEL =
-  process.env.AI_PROMPT_MODEL || "gemini-3.1-flash-lite-preview-thinking-high";
+  process.env.AI_PROMPT_MODEL || "gemini-3.1-flash-lite-preview";
 const AI_IMAGE_MODEL =
   process.env.AI_IMAGE_MODEL || "gemini-3.1-flash-image-preview-4k";
 const AI_IMAGE_REFERENCE_URL = process.env.AI_IMAGE_REFERENCE_URL || "";
@@ -322,7 +322,24 @@ function cleanImagePrompt(raw: string): string {
 
 // ─── POST: generate interpretation ──────────────────
 
+function expectedAdminSessionToken(): string {
+  const raw =
+    process.env.ADMIN_SESSION_TOKEN ||
+    process.env.ADMIN_PASSWORD ||
+    "ChangeMe123!";
+  return String(raw).trim();
+}
+
+function isAdminSession(req: NextRequest): boolean {
+  const token = req.cookies.get("admin_session")?.value;
+  return Boolean(token && token === expectedAdminSessionToken());
+}
+
 export async function POST(req: NextRequest) {
+  if (!isAdminSession(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
   const { patient_id, report_text, exam_site, findings, conclusion } = body;
 

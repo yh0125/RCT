@@ -17,11 +17,11 @@ export function middleware(req: NextRequest) {
   const isAuthApi =
     pathname.startsWith("/api/admin/login") ||
     pathname.startsWith("/api/admin/logout");
+  // 注意：/api/interpret 的 GET 需对患者端开放；POST 在 route 内单独校验管理员 Cookie
   const protectedApiPaths = [
     "/api/export",
     "/api/prompts",
     "/api/stats",
-    "/api/interpret",
   ];
   const isProtectedApi = protectedApiPaths.some((p) => pathname.startsWith(p));
   const isPatientsManageApi =
@@ -66,7 +66,6 @@ export const config = {
     "/api/export/:path*",
     "/api/prompts/:path*",
     "/api/stats/:path*",
-    "/api/interpret/:path*",
     "/api/patients/:path*",
     "/admin-login/:path*",
     // 显式包含无后缀路径，避免部分环境下 :path* 未命中

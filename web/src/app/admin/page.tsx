@@ -644,9 +644,27 @@ function ReportDialog({
         }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: { error?: string; interpretation?: NonNullable<typeof result> } = {};
+      if (text) {
+        try {
+          data = JSON.parse(text) as typeof data;
+        } catch {
+          setError(
+            res.ok
+              ? "返回数据格式异常，请重试"
+              : `HTTP ${res.status}：网关返回了非 JSON（多为超时或反向代理错误页）。请加大 Nginx proxy_read_timeout，或先在 .env.local 设 AI_ENABLE_IMAGE_GENERATION=0 验证文字解读。`
+          );
+          return;
+        }
+      }
+
       if (!res.ok) {
-        setError(data.error || "生成失败");
+        setError(data.error || `生成失败（HTTP ${res.status}）`);
+        return;
+      }
+      if (!data.interpretation) {
+        setError("返回数据缺少解读内容");
         return;
       }
       setResult(data.interpretation);
