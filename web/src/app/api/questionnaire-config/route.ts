@@ -27,10 +27,16 @@ async function loadByGroupFromKey(key: string): Promise<QuestionnaireByGroup | n
 
 async function migrateLegacyIfNeeded(legacyRows: unknown[]): Promise<QuestionnaireByGroup | null> {
   const normalized = normalizeQuestionSet(
-    legacyRows.map((q) => ({
-      ...q,
-      type: inferLegacyType((q as { type?: unknown }).type),
-    }))
+    legacyRows.map((q, i) => {
+      const base =
+        q && typeof q === "object"
+          ? (q as Record<string, unknown>)
+          : { key: `pus_q${i + 1}`, text: String(q ?? "") };
+      return {
+        ...base,
+        type: inferLegacyType(base.type),
+      };
+    })
   );
   if (!normalized.length) return null;
   const byGroup: QuestionnaireByGroup = { A: normalized, B: normalized, C: normalized };
