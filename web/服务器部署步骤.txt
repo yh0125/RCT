@@ -130,6 +130,9 @@
 （与 web/src/app/api/interpret/route.ts 中 maxDuration=300 秒配合：网关应略大于应用上限；
 若仍 504，检查前面是否还有 CDN/云负载均衡单独超时。）
 
+说明：浏览器先收到 504 时，Node 进程往往仍在后台跑完 AI 并写入 Supabase，故会出现「前端超时但库里已有解读」。
+后台「生成 AI 解读」在 502/503/504/524 或网关非 JSON 时会自动轮询 GET 拉取已落库结果；根本解决仍是加大各层超时或关闭文生图缩短耗时。
+
 改完后：nginx -t && systemctl reload nginx
 
 服务器上自测（把域名换成你的）：

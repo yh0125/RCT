@@ -24,7 +24,8 @@ type Patient = {
   modality: string;
 };
 
-type Question = { key: string; text: string };
+type QuestionType = "likert5" | "likert7" | "yes_no";
+type Question = { key: string; text: string; type?: QuestionType };
 
 type DemoField = {
   key: string;
@@ -46,6 +47,16 @@ type Step =
   | "questionnaire"
   | "done"
   | "error";
+
+function questionScale(type?: QuestionType): { values: number[]; left: string; right: string } {
+  if (type === "likert7") {
+    return { values: [1, 2, 3, 4, 5, 6, 7], left: "非常不同意", right: "非常同意" };
+  }
+  if (type === "yes_no") {
+    return { values: [1, 2], left: "否", right: "是" };
+  }
+  return { values: [1, 2, 3, 4, 5], left: "非常不同意", right: "非常同意" };
+}
 
 // ─── Component ────────────────────────────────────────
 
@@ -539,7 +550,7 @@ export default function PatientEntryPage() {
     <PageShell>
       <h2 className="text-lg font-semibold text-gray-900">患者体验问卷</h2>
       <p className="mt-1 text-sm text-gray-500">
-        请根据您的真实感受，为以下每个陈述选择合适的分数
+        请根据您的真实感受回答以下问题（不同题目可有不同作答类型）
       </p>
 
       <div className="mt-4 space-y-5">
@@ -549,21 +560,21 @@ export default function PatientEntryPage() {
               {i + 1}. {q.text}
             </p>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">非常不同意</span>
-              <span className="text-xs text-gray-400">非常同意</span>
+              <span className="text-xs text-gray-400">{questionScale(q.type).left}</span>
+              <span className="text-xs text-gray-400">{questionScale(q.type).right}</span>
             </div>
-            <div className="mt-1 flex justify-between">
-              {[1, 2, 3, 4, 5].map((v) => (
+            <div className="mt-1 flex justify-between gap-1">
+              {questionScale(q.type).values.map((v) => (
                 <button
                   key={v}
                   onClick={() => setAnswers({ ...answers, [q.key]: v })}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium transition-all ${
+                  className={`flex h-10 min-w-10 items-center justify-center rounded-full px-2 text-sm font-medium transition-all ${
                     answers[q.key] === v
                       ? "bg-blue-600 text-white shadow-md"
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 >
-                  {v}
+                  {q.type === "yes_no" ? (v === 1 ? "否" : "是") : v}
                 </button>
               ))}
             </div>

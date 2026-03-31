@@ -580,6 +580,43 @@ function parseStructuredReport(raw: string): { exam_site: string; findings: stri
   return { exam_site: "", findings: raw, conclusion: "" };
 }
 
+/** 网关/CDN 在 Node 返回前超时（504）时，服务端常仍在跑完 AI 并写入库；用 GET 轮询拉已落库结果 */
+type InterpretationResultRow = {
+  ai_text: string;
+  ai_image_url: string;
+  original_report?: string;
+};
+
+async function pollInterpretationAfterTimeout(
+  patientId: string,
+  options?: { initialDelayMs?: number; attempts?: number; intervalMs?: number }
+): Promise<InterpretationResultRow | null> {
+  const initialDelayMs = options?.initialDelayMs ?? 3000;
+  const attempts = options?.attempts ?? 30;
+  const intervalMs = options?.intervalMs ?? 4000;
+  await new Promise((r) => setTimeout(r, initialDelayMs));
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const res = await fetch(`/api/interpret?patient_id=${patientId}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      const row = data.interpretation;
+      if (
+        row &&
+        (String(row.original_report ?? "").trim() ||
+          String(row.ai_text ?? "").trim())
+      ) {
+        return row as InterpretationResultRow;
+      }
+    } catch {
+      /* 继续轮询 */
+    }
+  }
+  return null;
+}
+
 function ReportDialog({
   patient,
   onClose,
@@ -632,6 +669,16 @@ function ReportDialog({
     setGenerating(true);
     setError("");
 
+    const tryRecoverAfterProxyTimeout = async (): Promise<boolean> => {
+      const row = await pollInterpretationAfterTimeout(patient.id);
+      if (row) {
+        setResult(row);
+        setShowUpload(false);
+        return true;
+      }
+      return false;
+    };
+
     try {
       const res = await fetch("/api/interpret", {
         method: "POST",
@@ -650,16 +697,21 @@ function ReportDialog({
         try {
           data = JSON.parse(text) as typeof data;
         } catch {
+          const proxyLikely =
+            !res.ok && [502, 503, 504, 524].includes(res.status);
+          if (proxyLikely && (await tryRecoverAfterProxyTimeout())) return;
           setError(
             res.ok
               ? "返回数据格式异常，请重试"
-              : `HTTP ${res.status}：网关返回了非 JSON（多为超时或反向代理错误页）。请加大 Nginx proxy_read_timeout，或先在 .env.local 设 AI_ENABLE_IMAGE_GENERATION=0 验证文字解读。`
+              : `HTTP ${res.status}：网关返回了非 JSON（多为超时或反向代理错误页）。请加大 Nginx proxy_read_timeout / CDN 源站超时，或先在 .env.local 设 AI_ENABLE_IMAGE_GENERATION=0 缩短耗时。若实际已生成，可关闭弹窗后重新打开患者重试拉取。`
           );
           return;
         }
       }
 
       if (!res.ok) {
+        const maybeTimedOut = [502, 503, 504, 524].includes(res.status);
+        if (maybeTimedOut && (await tryRecoverAfterProxyTimeout())) return;
         setError(data.error || `生成失败（HTTP ${res.status}）`);
         return;
       }
@@ -670,6 +722,7 @@ function ReportDialog({
       setResult(data.interpretation);
       setShowUpload(false);
     } catch {
+      if (await tryRecoverAfterProxyTimeout()) return;
       setError("网络错误，请重试");
     } finally {
       setGenerating(false);
@@ -1229,16 +1282,25 @@ function DemoFieldEditorDialog({ onClose }: { onClose: () => void }) {
 
 // ─── Questionnaire Editor Dialog ─────────────────────────
 
-const DEFAULT_QUESTIONS = [
-  { key: "pus_q1", text: "我对检查报告的内容感到容易理解" },
-  { key: "pus_q2", text: "我对检查结果有了清晰的认识" },
-  { key: "pus_q3", text: "阅读报告解读后，我的担忧有所减轻" },
-  { key: "pus_q4", text: "我觉得这份报告解读对我有帮助" },
-  { key: "pus_q5", text: "总体而言，我对这次体验感到满意" },
+type QuestionType = "likert5" | "likert7" | "yes_no";
+type QuestionnaireQuestion = { key: string; text: string; type: QuestionType };
+
+const DEFAULT_QUESTIONS: QuestionnaireQuestion[] = [
+  { key: "pus_q1", text: "我对检查报告的内容感到容易理解", type: "likert5" },
+  { key: "pus_q2", text: "我对检查结果有了清晰的认识", type: "likert5" },
+  { key: "pus_q3", text: "阅读报告解读后，我的担忧有所减轻", type: "likert5" },
+  { key: "pus_q4", text: "我觉得这份报告解读对我有帮助", type: "likert5" },
+  { key: "pus_q5", text: "总体而言，我对这次体验感到满意", type: "likert5" },
 ];
 
+const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  likert5: "1-5 分量表",
+  likert7: "1-7 分量表",
+  yes_no: "是/否",
+};
+
 function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
-  const [questions, setQuestions] = useState<{ key: string; text: string }[]>([]);
+  const [questions, setQuestions] = useState<QuestionnaireQuestion[]>([]);
   const [savedJson, setSavedJson] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1249,7 +1311,16 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
       try {
         const res = await fetch("/api/questionnaire-config", { cache: "no-store" });
         const data = await res.json();
-        const qs = data.questions ?? DEFAULT_QUESTIONS;
+        const qs = (data.questions ?? DEFAULT_QUESTIONS).map(
+          (q: Partial<QuestionnaireQuestion>, i: number): QuestionnaireQuestion => ({
+            key: q.key || `pus_q${i + 1}`,
+            text: String(q.text ?? ""),
+            type:
+              q.type === "likert5" || q.type === "likert7" || q.type === "yes_no"
+                ? q.type
+                : "likert5",
+          })
+        );
         setQuestions(qs);
         setSavedJson(JSON.stringify(qs));
       } catch {
@@ -1272,9 +1343,13 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
       setTimeout(() => setMsg(""), 2000);
       return;
     }
-    const normalized = filtered.map((q, i) => ({
+    const normalized: QuestionnaireQuestion[] = filtered.map((q, i) => ({
       key: q.key || `pus_q${i + 1}`,
       text: q.text.trim(),
+      type:
+        q.type === "likert5" || q.type === "likert7" || q.type === "yes_no"
+          ? q.type
+          : "likert5",
     }));
 
     setSaving(true);
@@ -1306,7 +1381,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
   const addQuestion = () => {
     setQuestions([
       ...questions,
-      { key: `pus_q${questions.length + 1}`, text: "" },
+      { key: `pus_q${questions.length + 1}`, text: "", type: "likert5" },
     ]);
   };
 
@@ -1317,6 +1392,12 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
   const updateText = (idx: number, text: string) => {
     const next = [...questions];
     next[idx] = { ...next[idx], text };
+    setQuestions(next);
+  };
+
+  const updateType = (idx: number, type: QuestionType) => {
+    const next = [...questions];
+    next[idx] = { ...next[idx], type };
     setQuestions(next);
   };
 
@@ -1337,7 +1418,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
             <div>
               <h3 className="text-lg font-semibold text-gray-900">问卷题目设置</h3>
               <p className="text-xs text-gray-500">
-                修改患者填写的问卷题目，所有题目均为 1-5 分 Likert 量表
+                修改患者填写的问卷题目，并可为每题选择题型
               </p>
             </div>
           </div>
@@ -1364,13 +1445,30 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
                   <span className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
                     {i + 1}
                   </span>
-                  <input
-                    type="text"
-                    className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    value={q.text}
-                    onChange={(e) => updateText(i, e.target.value)}
-                    placeholder="请输入题目内容..."
-                  />
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="text"
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      value={q.text}
+                      onChange={(e) => updateText(i, e.target.value)}
+                      placeholder="请输入题目内容..."
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {(["likert5", "likert7", "yes_no"] as const).map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => updateType(i, t)}
+                          className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                            q.type === t
+                              ? "border-blue-500 bg-blue-50 text-blue-700"
+                              : "border-gray-300 text-gray-600 hover:border-gray-400"
+                          }`}
+                        >
+                          {QUESTION_TYPE_LABELS[t]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       onClick={() => moveQuestion(i, -1)}
