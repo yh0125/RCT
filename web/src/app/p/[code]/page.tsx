@@ -20,7 +20,13 @@ type Patient = {
   modality: string;
 };
 
-type QuestionType = "likert5" | "likert7" | "yes_no";
+type QuestionType =
+  | "likert3"
+  | "likert5"
+  | "likert7"
+  | "yes_no"
+  | "nps10"
+  | "frequency5";
 type Question = { key: string; text: string; type?: QuestionType };
 
 type DemoField = {
@@ -36,11 +42,20 @@ type DemoField = {
 type Step = "loading" | "info" | "consent" | "report" | "questionnaire" | "done" | "error";
 
 function questionScale(type?: QuestionType): { values: number[]; left: string; right: string } {
+  if (type === "likert3") {
+    return { values: [1, 2, 3], left: "不同意", right: "同意" };
+  }
   if (type === "likert7") {
     return { values: [1, 2, 3, 4, 5, 6, 7], left: "非常不同意", right: "非常同意" };
   }
+  if (type === "nps10") {
+    return { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], left: "完全不可能", right: "非常可能" };
+  }
+  if (type === "frequency5") {
+    return { values: [1, 2, 3, 4, 5], left: "从不", right: "总是" };
+  }
   if (type === "yes_no") {
-    return { values: [1, 2], left: "否", right: "是" };
+    return { values: [0, 1], left: "否", right: "是" };
   }
   return { values: [1, 2, 3, 4, 5], left: "非常不同意", right: "非常同意" };
 }
@@ -62,9 +77,8 @@ export default function PatientPage() {
 
   const fetchPatient = useCallback(async () => {
     try {
-      const [patientRes, qRes, demoRes] = await Promise.all([
+      const [patientRes, demoRes] = await Promise.all([
         fetch(`/api/patients?code=${code}`),
-        fetch("/api/questionnaire-config", { cache: "no-store" }),
         fetch("/api/demographic-config", { cache: "no-store" }),
       ]);
       if (!patientRes.ok) throw new Error("未找到该患者编号");
@@ -76,6 +90,9 @@ export default function PatientPage() {
       setPatient(found);
 
       try {
+        const qRes = await fetch(`/api/questionnaire-config?group=${found.group_assignment}`, {
+          cache: "no-store",
+        });
         const qData = await qRes.json();
         if (Array.isArray(qData.questions) && qData.questions.length > 0) {
           setQuestions(qData.questions);
@@ -151,7 +168,7 @@ export default function PatientPage() {
 
   const handleSubmitQuestionnaire = async () => {
     if (!patient) return;
-    const unanswered = questions.filter((q) => !answers[q.key]);
+    const unanswered = questions.filter((q) => answers[q.key] === undefined);
     if (unanswered.length > 0) {
       alert("请回答所有问题后再提交");
       return;
@@ -361,7 +378,7 @@ export default function PatientPage() {
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 >
-                  {q.type === "yes_no" ? (v === 1 ? "否" : "是") : v}
+                  {q.type === "yes_no" ? (v === 0 ? "否" : "是") : v}
                 </button>
               ))}
             </div>

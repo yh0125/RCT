@@ -1282,7 +1282,8 @@ function DemoFieldEditorDialog({ onClose }: { onClose: () => void }) {
 
 // ─── Questionnaire Editor Dialog ─────────────────────────
 
-type QuestionType = "likert5" | "likert7" | "yes_no";
+type GroupKey = "A" | "B" | "C";
+type QuestionType = "likert3" | "likert5" | "likert7" | "yes_no" | "nps10" | "frequency5";
 type QuestionnaireQuestion = { key: string; text: string; type: QuestionType };
 
 const DEFAULT_QUESTIONS: QuestionnaireQuestion[] = [
@@ -1293,14 +1294,51 @@ const DEFAULT_QUESTIONS: QuestionnaireQuestion[] = [
   { key: "pus_q5", text: "总体而言，我对这次体验感到满意", type: "likert5" },
 ];
 
+const DEFAULT_QUESTIONS_BY_GROUP: Record<GroupKey, QuestionnaireQuestion[]> = {
+  A: DEFAULT_QUESTIONS,
+  B: DEFAULT_QUESTIONS,
+  C: DEFAULT_QUESTIONS,
+};
+
 const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  likert3: "1-3 分量表",
   likert5: "1-5 分量表",
   likert7: "1-7 分量表",
   yes_no: "是/否",
+  nps10: "0-10 推荐值",
+  frequency5: "频次 1-5",
 };
 
+function normalizeQuestionType(type: unknown): QuestionType {
+  return type === "likert3" ||
+    type === "likert5" ||
+    type === "likert7" ||
+    type === "yes_no" ||
+    type === "nps10" ||
+    type === "frequency5"
+    ? type
+    : "likert5";
+}
+
+function normalizeQuestionSet(raw: unknown): QuestionnaireQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((q, i) => {
+      const text = String(q?.text ?? "").trim();
+      if (!text) return null;
+      return {
+        key: String(q?.key || `pus_q${i + 1}`).trim(),
+        text,
+        type: normalizeQuestionType(q?.type),
+      } as QuestionnaireQuestion;
+    })
+    .filter(Boolean) as QuestionnaireQuestion[];
+}
+
 function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
-  const [questions, setQuestions] = useState<QuestionnaireQuestion[]>([]);
+  const [questionsByGroup, setQuestionsByGroup] =
+    useState<Record<GroupKey, QuestionnaireQuestion[]>>(DEFAULT_QUESTIONS_BY_GROUP);
+  const [activeGroup, setActiveGroup] = useState<GroupKey>("A");
   const [savedJson, setSavedJson] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1311,21 +1349,20 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
       try {
         const res = await fetch("/api/questionnaire-config", { cache: "no-store" });
         const data = await res.json();
-        const qs = (data.questions ?? DEFAULT_QUESTIONS).map(
-          (q: Partial<QuestionnaireQuestion>, i: number): QuestionnaireQuestion => ({
-            key: q.key || `pus_q${i + 1}`,
-            text: String(q.text ?? ""),
-            type:
-              q.type === "likert5" || q.type === "likert7" || q.type === "yes_no"
-                ? q.type
-                : "likert5",
-          })
-        );
-        setQuestions(qs);
-        setSavedJson(JSON.stringify(qs));
+        const byGroupRaw = data.questions_by_group;
+        const next: Record<GroupKey, QuestionnaireQuestion[]> = {
+          A: normalizeQuestionSet(byGroupRaw?.A),
+          B: normalizeQuestionSet(byGroupRaw?.B),
+          C: normalizeQuestionSet(byGroupRaw?.C),
+        };
+        if (!next.A.length) next.A = [...DEFAULT_QUESTIONS];
+        if (!next.B.length) next.B = [...DEFAULT_QUESTIONS];
+        if (!next.C.length) next.C = [...DEFAULT_QUESTIONS];
+        setQuestionsByGroup(next);
+        setSavedJson(JSON.stringify(next));
       } catch {
-        setQuestions([...DEFAULT_QUESTIONS]);
-        setSavedJson(JSON.stringify(DEFAULT_QUESTIONS));
+        setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP });
+        setSavedJson(JSON.stringify(DEFAULT_QUESTIONS_BY_GROUP));
       } finally {
         setLoading(false);
       }
@@ -1333,24 +1370,21 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
     load();
   }, []);
 
-  const isDirty = JSON.stringify(questions) !== savedJson;
+  const isDirty = JSON.stringify(questionsByGroup) !== savedJson;
+  const questions = questionsByGroup[activeGroup];
 
   const handleSave = async () => {
     if (!isDirty) return;
-    const filtered = questions.filter((q) => q.text.trim());
-    if (filtered.length === 0) {
-      setMsg("至少保留一个问题");
+    const normalizedByGroup: Record<GroupKey, QuestionnaireQuestion[]> = {
+      A: normalizeQuestionSet(questionsByGroup.A),
+      B: normalizeQuestionSet(questionsByGroup.B),
+      C: normalizeQuestionSet(questionsByGroup.C),
+    };
+    if (!normalizedByGroup.A.length || !normalizedByGroup.B.length || !normalizedByGroup.C.length) {
+      setMsg("A/B/C 每组至少保留一个问题");
       setTimeout(() => setMsg(""), 2000);
       return;
     }
-    const normalized: QuestionnaireQuestion[] = filtered.map((q, i) => ({
-      key: q.key || `pus_q${i + 1}`,
-      text: q.text.trim(),
-      type:
-        q.type === "likert5" || q.type === "likert7" || q.type === "yes_no"
-          ? q.type
-          : "likert5",
-    }));
 
     setSaving(true);
     setMsg("");
@@ -1359,12 +1393,12 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          key: "questionnaire_questions",
-          value: JSON.stringify(normalized),
+          key: "questionnaire_questions_by_group",
+          value: JSON.stringify(normalizedByGroup),
         }),
       });
-      setQuestions(normalized);
-      setSavedJson(JSON.stringify(normalized));
+      setQuestionsByGroup(normalizedByGroup);
+      setSavedJson(JSON.stringify(normalizedByGroup));
       setMsg("已保存");
     } catch {
       setMsg("保存失败");
@@ -1375,30 +1409,36 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
   };
 
   const handleReset = () => {
-    setQuestions([...DEFAULT_QUESTIONS]);
+    setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP });
   };
 
   const addQuestion = () => {
-    setQuestions([
-      ...questions,
-      { key: `pus_q${questions.length + 1}`, text: "", type: "likert5" },
-    ]);
+    setQuestionsByGroup({
+      ...questionsByGroup,
+      [activeGroup]: [
+        ...questions,
+        { key: `pus_${activeGroup.toLowerCase()}_q${questions.length + 1}`, text: "", type: "likert5" },
+      ],
+    });
   };
 
   const removeQuestion = (idx: number) => {
-    setQuestions(questions.filter((_, i) => i !== idx));
+    setQuestionsByGroup({
+      ...questionsByGroup,
+      [activeGroup]: questions.filter((_, i) => i !== idx),
+    });
   };
 
   const updateText = (idx: number, text: string) => {
     const next = [...questions];
     next[idx] = { ...next[idx], text };
-    setQuestions(next);
+    setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
   };
 
   const updateType = (idx: number, type: QuestionType) => {
     const next = [...questions];
     next[idx] = { ...next[idx], type };
-    setQuestions(next);
+    setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
   };
 
   const moveQuestion = (idx: number, dir: -1 | 1) => {
@@ -1406,7 +1446,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
     if (target < 0 || target >= questions.length) return;
     const next = [...questions];
     [next[idx], next[target]] = [next[target], next[idx]];
-    setQuestions(next);
+    setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
   };
 
   return (
@@ -1418,7 +1458,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
             <div>
               <h3 className="text-lg font-semibold text-gray-900">问卷题目设置</h3>
               <p className="text-xs text-gray-500">
-                修改患者填写的问卷题目，并可为每题选择题型
+                按 A/B/C 组分别设置问卷，并可为每题选择题型
               </p>
             </div>
           </div>
@@ -1437,6 +1477,21 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {(["A", "B", "C"] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setActiveGroup(g)}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      activeGroup === g
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    {g} 组（{questionsByGroup[g].length}题）
+                  </button>
+                ))}
+              </div>
               {questions.map((q, i) => (
                 <div
                   key={i}
@@ -1454,7 +1509,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
                       placeholder="请输入题目内容..."
                     />
                     <div className="flex flex-wrap gap-1.5">
-                      {(["likert5", "likert7", "yes_no"] as const).map((t) => (
+                      {(["likert3", "likert5", "likert7", "yes_no", "nps10", "frequency5"] as const).map((t) => (
                         <button
                           key={t}
                           onClick={() => updateType(i, t)}
@@ -1527,7 +1582,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
             </span>
           )}
           <span className="ml-auto text-xs text-gray-400">
-            {questions.length} 道题目
+            当前 {activeGroup} 组 {questions.length} 题
             {isDirty && " · 有未保存的修改"}
           </span>
         </div>

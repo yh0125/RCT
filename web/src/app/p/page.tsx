@@ -24,7 +24,13 @@ type Patient = {
   modality: string;
 };
 
-type QuestionType = "likert5" | "likert7" | "yes_no";
+type QuestionType =
+  | "likert3"
+  | "likert5"
+  | "likert7"
+  | "yes_no"
+  | "nps10"
+  | "frequency5";
 type Question = { key: string; text: string; type?: QuestionType };
 
 type DemoField = {
@@ -49,11 +55,20 @@ type Step =
   | "error";
 
 function questionScale(type?: QuestionType): { values: number[]; left: string; right: string } {
+  if (type === "likert3") {
+    return { values: [1, 2, 3], left: "不同意", right: "同意" };
+  }
   if (type === "likert7") {
     return { values: [1, 2, 3, 4, 5, 6, 7], left: "非常不同意", right: "非常同意" };
   }
+  if (type === "nps10") {
+    return { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], left: "完全不可能", right: "非常可能" };
+  }
+  if (type === "frequency5") {
+    return { values: [1, 2, 3, 4, 5], left: "从不", right: "总是" };
+  }
   if (type === "yes_no") {
-    return { values: [1, 2], left: "否", right: "是" };
+    return { values: [0, 1], left: "否", right: "是" };
   }
   return { values: [1, 2, 3, 4, 5], left: "非常不同意", right: "非常同意" };
 }
@@ -81,19 +96,23 @@ export default function PatientEntryPage() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  const loadQuestionsByGroup = useCallback(async (group: string) => {
+    const g = group === "A" || group === "B" || group === "C" ? group : "A";
+    try {
+      const res = await fetch(`/api/questionnaire-config?group=${g}`, { cache: "no-store" });
+      const data = await res.json();
+      if (Array.isArray(data.questions) && data.questions.length > 0) {
+        setQuestions(data.questions);
+      }
+    } catch {
+      // ignore and keep existing
+    }
+  }, []);
+
   // Load configs
   useEffect(() => {
     async function loadConfigs() {
-      const [qRes, dRes] = await Promise.all([
-        fetch("/api/questionnaire-config", { cache: "no-store" }),
-        fetch("/api/demographic-config", { cache: "no-store" }),
-      ]);
-      try {
-        const qData = await qRes.json();
-        if (Array.isArray(qData.questions) && qData.questions.length > 0) {
-          setQuestions(qData.questions);
-        }
-      } catch { /* defaults */ }
+      const dRes = await fetch("/api/demographic-config", { cache: "no-store" });
       try {
         const dData = await dRes.json();
         if (Array.isArray(dData.fields) && dData.fields.length > 0) {
@@ -107,6 +126,7 @@ export default function PatientEntryPage() {
   // Route patient to correct step based on status
   const routePatient = useCallback((p: Patient) => {
     setPatient(p);
+    loadQuestionsByGroup(p.group_assignment);
     if (p.status === "completed") {
       setStep("done");
     } else if (p.status === "report_ready") {
@@ -114,7 +134,7 @@ export default function PatientEntryPage() {
     } else {
       setStep("waiting");
     }
-  }, []);
+  }, [loadQuestionsByGroup]);
 
   // ─── Lookup ──────────────────────────────────────────
 
@@ -190,7 +210,7 @@ export default function PatientEntryPage() {
 
   const handleSubmitQuestionnaire = async () => {
     if (!patient) return;
-    const unanswered = questions.filter((q) => !answers[q.key]);
+    const unanswered = questions.filter((q) => answers[q.key] === undefined);
     if (unanswered.length > 0) {
       alert("请回答所有问题后再提交");
       return;
@@ -574,7 +594,7 @@ export default function PatientEntryPage() {
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 >
-                  {q.type === "yes_no" ? (v === 1 ? "否" : "是") : v}
+                  {q.type === "yes_no" ? (v === 0 ? "否" : "是") : v}
                 </button>
               ))}
             </div>
