@@ -40,7 +40,9 @@ CREATE TABLE questionnaire_responses (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
   question_key VARCHAR(50) NOT NULL,               -- 如 pus_q1, pus_q2, ...
-  response_value INTEGER NOT NULL,                 -- 1-5 或 1-7
+  response_value INTEGER,                          -- 评分题可用（1-5 / 1-7 / 0-10）
+  response_text TEXT,                              -- 文本题答案
+  response_json JSONB,                             -- 多选等结构化答案
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -84,3 +86,34 @@ CREATE TABLE IF NOT EXISTS prompt_config (
 
 ALTER TABLE prompt_config ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for anon" ON prompt_config FOR ALL USING (true) WITH CHECK (true);
+
+-- ─── 随机化策略配置 ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS randomization_config (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  method TEXT NOT NULL DEFAULT 'stratified_block', -- complete_random | stratified_block | custom_ratio | custom_sequence
+  weights JSONB DEFAULT '{"A":1,"B":1,"C":1}'::jsonb,
+  strata_field TEXT DEFAULT 'modality',
+  block_size INTEGER DEFAULT 6,
+  sequence_items JSONB DEFAULT '[]'::jsonb,
+  next_sequence_index INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (id = 1)
+);
+
+ALTER TABLE randomization_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for anon" ON randomization_config FOR ALL USING (true) WITH CHECK (true);
+
+-- ─── 分组调整审计日志 ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS group_assignment_audit (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
+  old_group VARCHAR(1) NOT NULL,
+  new_group VARCHAR(1) NOT NULL,
+  mode VARCHAR(20) NOT NULL,                       -- override | rewrite
+  reason TEXT,
+  operator TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE group_assignment_audit ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for anon" ON group_assignment_audit FOR ALL USING (true) WITH CHECK (true);

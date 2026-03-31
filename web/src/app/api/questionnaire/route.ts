@@ -10,10 +10,20 @@ export async function POST(req: NextRequest) {
   }
 
   const rows = responses.map(
-    (r: { question_key: string; response_value: number }) => ({
+    (r: {
+      question_key: string;
+      response_value?: number | null;
+      response_text?: string | null;
+      response_json?: string | null;
+    }) => ({
       patient_id,
       question_key: r.question_key,
-      response_value: r.response_value,
+      response_value:
+        r.response_value === null || r.response_value === undefined
+          ? null
+          : Number(r.response_value),
+      response_text: r.response_text ?? null,
+      response_json: r.response_json ?? null,
     })
   );
 

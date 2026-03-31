@@ -25,6 +25,15 @@ import {
   Eye,
   LogOut,
 } from "lucide-react";
+import {
+  DEFAULT_QUESTIONS_BY_GROUP,
+  GroupKey,
+  OptionLayout,
+  QuestionType,
+  QuestionnaireByGroup,
+  QuestionnaireOption,
+  QuestionnaireQuestion,
+} from "@/lib/questionnaire";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -51,6 +60,7 @@ type Stats = {
   groups: { A: number; B: number; C: number };
   byModality: Record<string, { A: number; B: number; C: number }>;
   byStatus: Record<string, number>;
+  randomization?: { method: string; manual_adjustments: number };
 };
 
 // ─── Constants ──────────────────────────────────────────
@@ -78,6 +88,8 @@ export default function AdminPage() {
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
   const [showDemoEditor, setShowDemoEditor] = useState(false);
   const [showNotifyEditor, setShowNotifyEditor] = useState(false);
+  const [showRandomizationEditor, setShowRandomizationEditor] = useState(false);
+  const [groupEditPatient, setGroupEditPatient] = useState<Patient | null>(null);
   const [showStudyQR, setShowStudyQR] = useState(false);
 
   useEffect(() => {
@@ -237,6 +249,10 @@ export default function AdminPage() {
                 <Settings size={16} />
                 邮件通知
               </button>
+              <button onClick={() => setShowRandomizationEditor(true)} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm">
+                <Settings size={16} />
+                随机化
+              </button>
               <button onClick={fetchData} className="btn-secondary gap-1.5 px-3 py-2 text-xs sm:text-sm" disabled={loading}>
                 <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                 刷新
@@ -350,6 +366,16 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+
+            {stats?.randomization && (
+              <div className="card">
+                <h3 className="mb-2 text-sm font-medium text-gray-500">随机化信息</h3>
+                <div className="space-y-1 text-sm text-gray-600">
+                  <p>当前方法：{stats.randomization.method}</p>
+                  <p>人工调整次数：{stats.randomization.manual_adjustments}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Patient Table */}
@@ -413,6 +439,12 @@ export default function AdminPage() {
                                 title="查看详情"
                               >
                                 <Eye size={14} />
+                              </button>
+                              <button
+                                onClick={() => setGroupEditPatient(p)}
+                                className="text-violet-600 hover:text-violet-800 hover:underline"
+                              >
+                                调整分组
                               </button>
                               {p.group_assignment !== "A" && (
                                 <button
@@ -491,6 +523,21 @@ export default function AdminPage() {
 
       {showNotifyEditor && (
         <EnrollmentNotifyDialog onClose={() => setShowNotifyEditor(false)} />
+      )}
+
+      {showRandomizationEditor && (
+        <RandomizationConfigDialog onClose={() => setShowRandomizationEditor(false)} />
+      )}
+
+      {groupEditPatient && (
+        <GroupAdjustDialog
+          patient={groupEditPatient}
+          onClose={() => setGroupEditPatient(null)}
+          onSaved={() => {
+            setGroupEditPatient(null);
+            fetchData();
+          }}
+        />
       )}
     </div>
   );
@@ -1282,63 +1329,101 @@ function DemoFieldEditorDialog({ onClose }: { onClose: () => void }) {
 
 // ─── Questionnaire Editor Dialog ─────────────────────────
 
-type GroupKey = "A" | "B" | "C";
-type QuestionType = "likert3" | "likert5" | "likert7" | "yes_no" | "nps10" | "frequency5";
-type QuestionnaireQuestion = { key: string; text: string; type: QuestionType };
-
-const DEFAULT_QUESTIONS: QuestionnaireQuestion[] = [
-  { key: "pus_q1", text: "我对检查报告的内容感到容易理解", type: "likert5" },
-  { key: "pus_q2", text: "我对检查结果有了清晰的认识", type: "likert5" },
-  { key: "pus_q3", text: "阅读报告解读后，我的担忧有所减轻", type: "likert5" },
-  { key: "pus_q4", text: "我觉得这份报告解读对我有帮助", type: "likert5" },
-  { key: "pus_q5", text: "总体而言，我对这次体验感到满意", type: "likert5" },
-];
-
-const DEFAULT_QUESTIONS_BY_GROUP: Record<GroupKey, QuestionnaireQuestion[]> = {
-  A: DEFAULT_QUESTIONS,
-  B: DEFAULT_QUESTIONS,
-  C: DEFAULT_QUESTIONS,
-};
-
 const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  single_choice: "单选题",
+  multi_choice: "多选题",
   likert3: "1-3 分量表",
   likert5: "1-5 分量表",
   likert7: "1-7 分量表",
   yes_no: "是/否",
   nps10: "0-10 推荐值",
   frequency5: "频次 1-5",
+  text_short: "简答（单行）",
+  text_long: "简答（多行）",
 };
 
-function normalizeQuestionType(type: unknown): QuestionType {
-  return type === "likert3" ||
-    type === "likert5" ||
-    type === "likert7" ||
-    type === "yes_no" ||
-    type === "nps10" ||
-    type === "frequency5"
-    ? type
-    : "likert5";
+const LAYOUT_LABELS: Record<OptionLayout, string> = {
+  horizontal: "横排",
+  vertical: "竖排",
+  grid: "网格",
+};
+
+function defaultQuestionByType(type: QuestionType, i: number, g: GroupKey): QuestionnaireQuestion {
+  const base: QuestionnaireQuestion = {
+    key: `q_${g.toLowerCase()}_${Date.now()}_${i}`,
+    text: "",
+    type,
+    required: true,
+    layout: "vertical",
+    columns: 2,
+  };
+  if (type === "single_choice" || type === "multi_choice") {
+    base.options = [
+      { id: "opt_1", label: "选项 1", value: "1" },
+      { id: "opt_2", label: "选项 2", value: "2" },
+    ];
+    base.layout = "grid";
+  } else if (type === "yes_no") {
+    base.options = [
+      { id: "no", label: "否", value: "0" },
+      { id: "yes", label: "是", value: "1" },
+    ];
+    base.layout = "horizontal";
+  } else if (type === "likert3") {
+    base.min = 1; base.max = 3; base.step = 1;
+  } else if (type === "likert5" || type === "frequency5") {
+    base.min = 1; base.max = 5; base.step = 1;
+  } else if (type === "likert7") {
+    base.min = 1; base.max = 7; base.step = 1;
+  } else if (type === "nps10") {
+    base.min = 0; base.max = 10; base.step = 1;
+  }
+  return base;
 }
 
 function normalizeQuestionSet(raw: unknown): QuestionnaireQuestion[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((q, i) => {
-      const text = String(q?.text ?? "").trim();
+      const text = String((q as { text?: unknown })?.text ?? "").trim();
       if (!text) return null;
+      const type = String((q as { type?: unknown })?.type ?? "likert5") as QuestionType;
+      const base = defaultQuestionByType(type, i, "A");
+      const rawOptions = (q as { options?: unknown[] })?.options;
+      const options = Array.isArray(rawOptions)
+        ? rawOptions
+            .map((o, oi) => {
+              const label = String((o as { label?: unknown })?.label ?? "").trim();
+              if (!label) return null;
+              return {
+                id: String((o as { id?: unknown })?.id ?? `opt_${oi + 1}`),
+                label,
+                value: String((o as { value?: unknown })?.value ?? `${oi + 1}`),
+              } as QuestionnaireOption;
+            })
+            .filter(Boolean) as QuestionnaireOption[]
+        : base.options;
       return {
-        key: String(q?.key || `pus_q${i + 1}`).trim(),
+        ...base,
+        key: String((q as { key?: unknown })?.key ?? base.key).trim(),
         text,
-        type: normalizeQuestionType(q?.type),
+        type,
+        required: (q as { required?: boolean }).required !== false,
+        layout: (q as { layout?: OptionLayout }).layout ?? base.layout,
+        columns: Number((q as { columns?: number }).columns ?? base.columns ?? 2),
+        min: Number((q as { min?: number }).min ?? base.min ?? 0),
+        max: Number((q as { max?: number }).max ?? base.max ?? 0),
+        step: Number((q as { step?: number }).step ?? base.step ?? 1),
+        options,
       } as QuestionnaireQuestion;
     })
     .filter(Boolean) as QuestionnaireQuestion[];
 }
 
 function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
-  const [questionsByGroup, setQuestionsByGroup] =
-    useState<Record<GroupKey, QuestionnaireQuestion[]>>(DEFAULT_QUESTIONS_BY_GROUP);
+  const [questionsByGroup, setQuestionsByGroup] = useState<QuestionnaireByGroup>(DEFAULT_QUESTIONS_BY_GROUP);
   const [activeGroup, setActiveGroup] = useState<GroupKey>("A");
+  const [activeIdx, setActiveIdx] = useState(0);
   const [savedJson, setSavedJson] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1355,13 +1440,13 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
           B: normalizeQuestionSet(byGroupRaw?.B),
           C: normalizeQuestionSet(byGroupRaw?.C),
         };
-        if (!next.A.length) next.A = [...DEFAULT_QUESTIONS];
-        if (!next.B.length) next.B = [...DEFAULT_QUESTIONS];
-        if (!next.C.length) next.C = [...DEFAULT_QUESTIONS];
-        setQuestionsByGroup(next);
+        if (!next.A.length) next.A = [...DEFAULT_QUESTIONS_BY_GROUP.A];
+        if (!next.B.length) next.B = [...DEFAULT_QUESTIONS_BY_GROUP.B];
+        if (!next.C.length) next.C = [...DEFAULT_QUESTIONS_BY_GROUP.C];
+        setQuestionsByGroup(next as QuestionnaireByGroup);
         setSavedJson(JSON.stringify(next));
       } catch {
-        setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP });
+        setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP } as QuestionnaireByGroup);
         setSavedJson(JSON.stringify(DEFAULT_QUESTIONS_BY_GROUP));
       } finally {
         setLoading(false);
@@ -1375,7 +1460,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
 
   const handleSave = async () => {
     if (!isDirty) return;
-    const normalizedByGroup: Record<GroupKey, QuestionnaireQuestion[]> = {
+    const normalizedByGroup: QuestionnaireByGroup = {
       A: normalizeQuestionSet(questionsByGroup.A),
       B: normalizeQuestionSet(questionsByGroup.B),
       C: normalizeQuestionSet(questionsByGroup.C),
@@ -1393,7 +1478,7 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          key: "questionnaire_questions_by_group",
+          key: "questionnaire_questions_by_group_v2",
           value: JSON.stringify(normalizedByGroup),
         }),
       });
@@ -1409,17 +1494,17 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
   };
 
   const handleReset = () => {
-    setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP });
+    setQuestionsByGroup({ ...DEFAULT_QUESTIONS_BY_GROUP } as QuestionnaireByGroup);
+    setActiveIdx(0);
   };
 
-  const addQuestion = () => {
+  const addQuestion = (type: QuestionType = "likert5") => {
+    const q = defaultQuestionByType(type, questions.length + 1, activeGroup);
     setQuestionsByGroup({
       ...questionsByGroup,
-      [activeGroup]: [
-        ...questions,
-        { key: `pus_${activeGroup.toLowerCase()}_q${questions.length + 1}`, text: "", type: "likert5" },
-      ],
+      [activeGroup]: [...questions, q],
     });
+    setActiveIdx(questions.length);
   };
 
   const removeQuestion = (idx: number) => {
@@ -1427,18 +1512,25 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
       ...questionsByGroup,
       [activeGroup]: questions.filter((_, i) => i !== idx),
     });
+    if (activeIdx >= questions.length - 1) setActiveIdx(Math.max(0, questions.length - 2));
   };
 
-  const updateText = (idx: number, text: string) => {
+  const updateQuestion = (idx: number, patch: Partial<QuestionnaireQuestion>) => {
     const next = [...questions];
-    next[idx] = { ...next[idx], text };
+    next[idx] = { ...next[idx], ...patch };
     setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
   };
 
   const updateType = (idx: number, type: QuestionType) => {
-    const next = [...questions];
-    next[idx] = { ...next[idx], type };
-    setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
+    const prev = questions[idx];
+    const reset = defaultQuestionByType(type, idx + 1, activeGroup);
+    updateQuestion(idx, {
+      ...reset,
+      key: prev.key,
+      text: prev.text,
+      required: prev.required,
+      type,
+    });
   };
 
   const moveQuestion = (idx: number, dir: -1 | 1) => {
@@ -1447,11 +1539,33 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
     const next = [...questions];
     [next[idx], next[target]] = [next[target], next[idx]];
     setQuestionsByGroup({ ...questionsByGroup, [activeGroup]: next });
+    setActiveIdx(target);
   };
+
+  const addOption = (idx: number) => {
+    const q = questions[idx];
+    const options = [...(q.options ?? []), { id: `opt_${Date.now()}`, label: `选项 ${(q.options?.length ?? 0) + 1}`, value: `${(q.options?.length ?? 0) + 1}` }];
+    updateQuestion(idx, { options });
+  };
+
+  const updateOption = (idx: number, optIdx: number, patch: Partial<QuestionnaireOption>) => {
+    const q = questions[idx];
+    const options = [...(q.options ?? [])];
+    options[optIdx] = { ...options[optIdx], ...patch };
+    updateQuestion(idx, { options });
+  };
+
+  const removeOption = (idx: number, optIdx: number) => {
+    const q = questions[idx];
+    const options = (q.options ?? []).filter((_, i) => i !== optIdx);
+    updateQuestion(idx, { options });
+  };
+
+  const current = questions[activeIdx];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className="relative flex h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
+      <div className="relative flex h-[86vh] w-full max-w-6xl flex-col rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div className="flex items-center gap-3">
             <ListChecks size={20} className="text-blue-600" />
@@ -1470,95 +1584,217 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-hidden">
           {loading ? (
-            <div className="flex h-full items-center justify-center">
+            <div className="flex h-full items-center justify-center p-6">
               <Loader2 size={24} className="animate-spin text-blue-500" />
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                {(["A", "B", "C"] as const).map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setActiveGroup(g)}
-                    className={`rounded-full border px-3 py-1 text-xs ${
-                      activeGroup === g
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-300 text-gray-600 hover:border-gray-400"
-                    }`}
-                  >
-                    {g} 组（{questionsByGroup[g].length}题）
-                  </button>
-                ))}
-              </div>
-              {questions.map((q, i) => (
-                <div
-                  key={i}
-                  className="group flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 transition-colors hover:border-blue-200"
+            <div className="grid h-full grid-cols-12">
+              <div className="col-span-4 border-r bg-gray-50 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  {(["A", "B", "C"] as const).map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => {
+                        setActiveGroup(g);
+                        setActiveIdx(0);
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs ${
+                        activeGroup === g
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-gray-300 text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      {g} 组
+                    </button>
+                  ))}
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto pr-1">
+                  {questions.map((q, i) => (
+                    <button
+                      key={`${q.key}_${i}`}
+                      onClick={() => setActiveIdx(i)}
+                      className={`mb-1 w-full rounded-lg border px-3 py-2 text-left text-sm ${
+                        activeIdx === i
+                          ? "border-blue-400 bg-blue-50 text-blue-700"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <div className="truncate">{q.text || "(未命名题目)"}</div>
+                      <div className="mt-0.5 text-xs text-gray-500">{QUESTION_TYPE_LABELS[q.type]}</div>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => addQuestion("single_choice")}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-2.5 text-sm text-gray-500 transition-colors hover:border-blue-400 hover:text-blue-600"
                 >
-                  <span className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 space-y-2">
-                    <input
-                      type="text"
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                      value={q.text}
-                      onChange={(e) => updateText(i, e.target.value)}
-                      placeholder="请输入题目内容..."
-                    />
-                    <div className="flex flex-wrap gap-1.5">
-                      {(["likert3", "likert5", "likert7", "yes_no", "nps10", "frequency5"] as const).map((t) => (
-                        <button
-                          key={t}
-                          onClick={() => updateType(i, t)}
-                          className={`rounded-full border px-2.5 py-1 text-xs transition ${
-                            q.type === t
-                              ? "border-blue-500 bg-blue-50 text-blue-700"
-                              : "border-gray-300 text-gray-600 hover:border-gray-400"
-                          }`}
-                        >
-                          {QUESTION_TYPE_LABELS[t]}
-                        </button>
-                      ))}
+                  <Plus size={16} />
+                  添加题目
+                </button>
+              </div>
+              <div className="col-span-8 overflow-y-auto p-5">
+                {current ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">题目内容</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        value={current.text}
+                        onChange={(e) => updateQuestion(activeIdx, { text: e.target.value })}
+                        placeholder="请输入题目内容..."
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">题目键名</label>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                          value={current.key}
+                          onChange={(e) => updateQuestion(activeIdx, { key: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700">是否必答</label>
+                        <label className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={current.required}
+                            onChange={(e) => updateQuestion(activeIdx, { required: e.target.checked })}
+                          />
+                          必答题
+                        </label>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">题型</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(Object.keys(QUESTION_TYPE_LABELS) as QuestionType[]).map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => updateType(activeIdx, t)}
+                            className={`rounded-full border px-2.5 py-1 text-xs ${
+                              current.type === t
+                                ? "border-blue-500 bg-blue-50 text-blue-700"
+                                : "border-gray-300 text-gray-600"
+                            }`}
+                          >
+                            {QUESTION_TYPE_LABELS[t]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {(current.type === "single_choice" || current.type === "multi_choice" || current.type === "yes_no") && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-sm font-medium text-gray-700">布局方式</label>
+                            <div className="flex gap-1.5">
+                              {(["horizontal", "vertical", "grid"] as OptionLayout[]).map((layout) => (
+                                <button
+                                  key={layout}
+                                  onClick={() => updateQuestion(activeIdx, { layout })}
+                                  className={`rounded-full border px-3 py-1 text-xs ${
+                                    current.layout === layout
+                                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                                      : "border-gray-300 text-gray-600"
+                                  }`}
+                                >
+                                  {LAYOUT_LABELS[layout]}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-sm font-medium text-gray-700">网格列数</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={6}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              value={current.columns ?? 2}
+                              onChange={(e) => updateQuestion(activeIdx, { columns: Number(e.target.value) || 2 })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="mb-1 flex items-center justify-between">
+                            <label className="block text-sm font-medium text-gray-700">选项设置</label>
+                            <button onClick={() => addOption(activeIdx)} className="btn-secondary px-2 py-1 text-xs">添加选项</button>
+                          </div>
+                          <div className="space-y-2">
+                            {(current.options ?? []).map((opt, oi) => (
+                              <div key={opt.id} className="grid grid-cols-12 gap-2">
+                                <input
+                                  className="col-span-5 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                                  value={opt.label}
+                                  onChange={(e) => updateOption(activeIdx, oi, { label: e.target.value })}
+                                  placeholder="显示文字"
+                                />
+                                <input
+                                  className="col-span-5 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                                  value={opt.value}
+                                  onChange={(e) => updateOption(activeIdx, oi, { value: e.target.value })}
+                                  placeholder="提交值"
+                                />
+                                <button
+                                  onClick={() => removeOption(activeIdx, oi)}
+                                  className="col-span-2 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                >
+                                  <Trash2 size={14} className="mx-auto" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {(current.type.includes("likert") || current.type === "nps10" || current.type === "frequency5") && (
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700">最小值</label>
+                          <input
+                            type="number"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            value={current.min ?? 1}
+                            onChange={(e) => updateQuestion(activeIdx, { min: Number(e.target.value) })}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700">最大值</label>
+                          <input
+                            type="number"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            value={current.max ?? 5}
+                            onChange={(e) => updateQuestion(activeIdx, { max: Number(e.target.value) })}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700">步长</label>
+                          <input
+                            type="number"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            value={current.step ?? 1}
+                            onChange={(e) => updateQuestion(activeIdx, { step: Number(e.target.value) || 1 })}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => moveQuestion(activeIdx, -1)} className="btn-secondary px-2 py-1 text-xs" disabled={activeIdx === 0}>上移</button>
+                      <button onClick={() => moveQuestion(activeIdx, 1)} className="btn-secondary px-2 py-1 text-xs" disabled={activeIdx === questions.length - 1}>下移</button>
+                      <button onClick={() => removeQuestion(activeIdx)} className="btn-secondary px-2 py-1 text-xs text-red-600">删除当前题</button>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => moveQuestion(i, -1)}
-                      disabled={i === 0}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 disabled:opacity-30"
-                      title="上移"
-                    >
-                      <GripVertical size={14} className="rotate-180" />
-                    </button>
-                    <button
-                      onClick={() => moveQuestion(i, 1)}
-                      disabled={i === questions.length - 1}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 disabled:opacity-30"
-                      title="下移"
-                    >
-                      <GripVertical size={14} />
-                    </button>
-                    <button
-                      onClick={() => removeQuestion(i)}
-                      className="rounded p-1 text-gray-400 hover:bg-red-100 hover:text-red-600"
-                      title="删除"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
+                    当前分组暂无题目，请点击左侧“添加题目”
                   </div>
-                </div>
-              ))}
-
-              <button
-                onClick={addQuestion}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors hover:border-blue-400 hover:text-blue-600"
-              >
-                <Plus size={16} />
-                添加题目
-              </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1585,6 +1821,276 @@ function QuestionEditorDialog({ onClose }: { onClose: () => void }) {
             当前 {activeGroup} 组 {questions.length} 题
             {isDirty && " · 有未保存的修改"}
           </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type RandomMethod = "complete_random" | "stratified_block" | "custom_ratio" | "custom_sequence";
+type RandomConfig = {
+  method: RandomMethod;
+  weights: { A: number; B: number; C: number };
+  block_size: number;
+  sequence_items: Array<{ group: GroupKey; stratification?: string }>;
+  next_sequence_index: number;
+};
+
+const DEFAULT_RANDOM_CONFIG: RandomConfig = {
+  method: "stratified_block",
+  weights: { A: 1, B: 1, C: 1 },
+  block_size: 6,
+  sequence_items: [],
+  next_sequence_index: 0,
+};
+
+function RandomizationConfigDialog({ onClose }: { onClose: () => void }) {
+  const [cfg, setCfg] = useState<RandomConfig>(DEFAULT_RANDOM_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [seqText, setSeqText] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/randomization-config", { cache: "no-store" });
+        const data = await res.json();
+        if (data?.config) {
+          setCfg({ ...DEFAULT_RANDOM_CONFIG, ...data.config });
+          setSeqText(
+            (data.config.sequence_items ?? [])
+              .map((x: { group: GroupKey; stratification?: string }) => `${x.group}${x.stratification ? `:${x.stratification}` : ""}`)
+              .join("\n")
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMsg("");
+    const sequence_items = seqText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [g, s] = line.split(":");
+        return { group: (g || "A") as GroupKey, stratification: s || undefined };
+      })
+      .filter((x) => x.group === "A" || x.group === "B" || x.group === "C");
+    const payload = { ...cfg, sequence_items };
+    try {
+      const res = await fetch("/api/randomization-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: payload }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setMsg("已保存");
+    } catch {
+      setMsg("保存失败");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl">
+        <button onClick={onClose} className="absolute right-3 top-3 rounded-full p-1 text-gray-400 hover:bg-gray-100">
+          <X size={20} />
+        </button>
+        <h3 className="text-lg font-semibold text-gray-900">随机化策略设置</h3>
+        {loading ? (
+          <div className="py-10 text-center text-sm text-gray-500">加载中...</div>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">方法</label>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ["complete_random", "完全随机"],
+                  ["stratified_block", "分层随机（顺序表）"],
+                  ["custom_ratio", "自定义比例随机"],
+                  ["custom_sequence", "自定义序列"],
+                ] as Array<[RandomMethod, string]>).map(([m, label]) => (
+                  <button
+                    key={m}
+                    onClick={() => setCfg({ ...cfg, method: m })}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      cfg.method === m ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-600"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(cfg.method === "custom_ratio" || cfg.method === "complete_random") && (
+              <div className="grid grid-cols-3 gap-3">
+                {(["A", "B", "C"] as GroupKey[]).map((g) => (
+                  <div key={g}>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">{g} 组权重</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      value={cfg.weights[g]}
+                      onChange={(e) =>
+                        setCfg({ ...cfg, weights: { ...cfg.weights, [g]: Number(e.target.value) || 0 } })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {cfg.method === "stratified_block" && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">块大小</label>
+                <input
+                  type="number"
+                  min={3}
+                  className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  value={cfg.block_size}
+                  onChange={(e) => setCfg({ ...cfg, block_size: Number(e.target.value) || 6 })}
+                />
+              </div>
+            )}
+            {cfg.method === "custom_sequence" && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  自定义序列（每行一条：`A` 或 `B:CT`）
+                </label>
+                <textarea
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  rows={8}
+                  value={seqText}
+                  onChange={(e) => setSeqText(e.target.value)}
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button onClick={handleSave} className="btn-primary gap-1.5" disabled={saving}>
+                <Save size={14} />
+                {saving ? "保存中..." : "保存"}
+              </button>
+              {msg && <span className={`text-sm ${msg === "已保存" ? "text-emerald-600" : "text-red-600"}`}>{msg}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupAdjustDialog({
+  patient,
+  onClose,
+  onSaved,
+}: {
+  patient: Patient;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [group, setGroup] = useState<GroupKey>((patient.group_assignment as GroupKey) || "A");
+  const [mode, setMode] = useState<"override" | "rewrite">("override");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/patients", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: patient.id,
+          group_assignment: group,
+          reassign_mode: mode,
+          reason: reason.trim(),
+          operator: "admin",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        setMsg(`保存失败：${err.error || "未知错误"}`);
+        return;
+      }
+      onSaved();
+    } catch {
+      setMsg("网络错误，请重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <button onClick={onClose} className="absolute right-3 top-3 rounded-full p-1 text-gray-400 hover:bg-gray-100">
+          <X size={20} />
+        </button>
+        <h3 className="text-lg font-semibold text-gray-900">调整患者分组</h3>
+        <p className="mt-1 text-xs text-gray-500">{patient.patient_code} · 当前 {patient.group_assignment} 组</p>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">目标分组</label>
+            <div className="flex gap-2">
+              {(["A", "B", "C"] as GroupKey[]).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGroup(g)}
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    group === g ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-600"
+                  }`}
+                >
+                  {g} 组
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">处理模式</label>
+            <div className="flex gap-2">
+              {([
+                ["override", "人工覆盖（保留原随机记录）"],
+                ["rewrite", "重写随机记录（影响统计）"],
+              ] as Array<["override" | "rewrite", string]>).map(([m, label]) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    mode === m ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-600"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">调整原因（可选）</label>
+            <textarea
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          {msg && <p className="text-sm text-red-600">{msg}</p>}
+          <button onClick={handleSave} className="btn-primary w-full gap-2" disabled={saving}>
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {saving ? "保存中..." : "确认调整"}
+          </button>
         </div>
       </div>
     </div>

@@ -22,6 +22,7 @@ export function middleware(req: NextRequest) {
     "/api/export",
     "/api/prompts",
     "/api/stats",
+    "/api/randomization-config",
   ];
   const isProtectedApi = protectedApiPaths.some((p) => pathname.startsWith(p));
   const isPatientsManageApi =
@@ -66,6 +67,7 @@ export const config = {
     "/api/export/:path*",
     "/api/prompts/:path*",
     "/api/stats/:path*",
+    "/api/randomization-config/:path*",
     "/api/patients/:path*",
     "/admin-login/:path*",
     // 显式包含无后缀路径，避免部分环境下 :path* 未命中

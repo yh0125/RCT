@@ -10,8 +10,11 @@ const VALID_KEYS = [
   "image_prompt_user",
   "image_final_prefix",
   "questionnaire_questions",
+  "questionnaire_questions_by_group",
+  "questionnaire_questions_by_group_v2",
   "demographic_fields",
   "enrollment_email_config",
+  "randomization_config",
 ];
 
 export async function GET() {

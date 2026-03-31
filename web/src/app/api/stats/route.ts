@@ -7,6 +7,14 @@ export async function GET() {
   const { data: patients, error } = await supabase
     .from("patients")
     .select("group_assignment, modality, status");
+  const { data: auditRows } = await supabase
+    .from("group_assignment_audit")
+    .select("id");
+  const { data: randomCfg } = await supabase
+    .from("randomization_config")
+    .select("method")
+    .eq("id", 1)
+    .single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -30,6 +38,10 @@ export async function GET() {
       report_ready: list.filter((p) => p.status === "report_ready").length,
       completed: list.filter((p) => p.status === "completed").length,
       withdrawn: list.filter((p) => p.status === "withdrawn").length,
+    },
+    randomization: {
+      method: randomCfg?.method || "stratified_block",
+      manual_adjustments: (auditRows ?? []).length,
     },
   };
 

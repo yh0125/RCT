@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   UserCircle,
 } from "lucide-react";
+import { QuestionnaireOption, QuestionnaireQuestion } from "@/lib/questionnaire";
 
 // ─── Types ────────────────────────────────────────────
 
@@ -23,15 +24,6 @@ type Patient = {
   status: string;
   modality: string;
 };
-
-type QuestionType =
-  | "likert3"
-  | "likert5"
-  | "likert7"
-  | "yes_no"
-  | "nps10"
-  | "frequency5";
-type Question = { key: string; text: string; type?: QuestionType };
 
 type DemoField = {
   key: string;
@@ -54,7 +46,10 @@ type Step =
   | "done"
   | "error";
 
-function questionScale(type?: QuestionType): { values: number[]; left: string; right: string } {
+function questionScale(
+  q: QuestionnaireQuestion
+): { values: number[]; left: string; right: string } {
+  const type = q.type;
   if (type === "likert3") {
     return { values: [1, 2, 3], left: "不同意", right: "同意" };
   }
@@ -68,7 +63,16 @@ function questionScale(type?: QuestionType): { values: number[]; left: string; r
     return { values: [1, 2, 3, 4, 5], left: "从不", right: "总是" };
   }
   if (type === "yes_no") {
-    return { values: [0, 1], left: "否", right: "是" };
+    const values = (q.options ?? []).length > 0
+      ? q.options!.map((x) => Number(x.value))
+      : [0, 1];
+    return { values, left: "否", right: "是" };
+  }
+  if (type === "single_choice" || type === "multi_choice") {
+    return { values: [], left: "", right: "" };
+  }
+  if (type === "text_short" || type === "text_long") {
+    return { values: [], left: "", right: "" };
   }
   return { values: [1, 2, 3, 4, 5], left: "非常不同意", right: "非常同意" };
 }
@@ -92,8 +96,8 @@ export default function PatientEntryPage() {
   const [consentChecked, setConsentChecked] = useState(false);
 
   // Questionnaire
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [questions, setQuestions] = useState<QuestionnaireQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const loadQuestionsByGroup = useCallback(async (group: string) => {
@@ -210,7 +214,13 @@ export default function PatientEntryPage() {
 
   const handleSubmitQuestionnaire = async () => {
     if (!patient) return;
-    const unanswered = questions.filter((q) => answers[q.key] === undefined);
+    const unanswered = questions.filter((q) => {
+      if (q.required === false) return false;
+      const v = answers[q.key];
+      if (q.type === "text_short" || q.type === "text_long") return !String(v ?? "").trim();
+      if (q.type === "multi_choice") return !Array.isArray(v) || v.length === 0;
+      return v === undefined || v === null || v === "";
+    });
     if (unanswered.length > 0) {
       alert("请回答所有问题后再提交");
       return;
@@ -223,10 +233,32 @@ export default function PatientEntryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patient_id: patient.id,
-          responses: Object.entries(answers).map(([key, value]) => ({
-            question_key: key,
-            response_value: value,
-          })),
+          responses: questions.map((q) => {
+            const v = answers[q.key];
+            if (q.type === "text_short" || q.type === "text_long") {
+              return {
+                question_key: q.key,
+                response_value: null,
+                response_text: String(v ?? ""),
+                response_json: null,
+              };
+            }
+            if (q.type === "multi_choice") {
+              const arr = Array.isArray(v) ? v : [];
+              return {
+                question_key: q.key,
+                response_value: null,
+                response_text: null,
+                response_json: JSON.stringify(arr),
+              };
+            }
+            return {
+              question_key: q.key,
+              response_value: v === undefined ? null : Number(v),
+              response_text: null,
+              response_json: null,
+            };
+          }),
         }),
       });
       setStep("done");
@@ -579,25 +611,90 @@ export default function PatientEntryPage() {
             <p className="mb-3 text-sm font-medium text-gray-800">
               {i + 1}. {q.text}
             </p>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">{questionScale(q.type).left}</span>
-              <span className="text-xs text-gray-400">{questionScale(q.type).right}</span>
-            </div>
-            <div className="mt-1 flex justify-between gap-1">
-              {questionScale(q.type).values.map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setAnswers({ ...answers, [q.key]: v })}
-                  className={`flex h-10 min-w-10 items-center justify-center rounded-full px-2 text-sm font-medium transition-all ${
-                    answers[q.key] === v
-                      ? "bg-blue-600 text-white shadow-md"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  {q.type === "yes_no" ? (v === 0 ? "否" : "是") : v}
-                </button>
-              ))}
-            </div>
+            {q.type === "text_short" ? (
+              <input
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                value={String(answers[q.key] ?? "")}
+                onChange={(e) => setAnswers({ ...answers, [q.key]: e.target.value })}
+                placeholder="请输入答案"
+              />
+            ) : q.type === "text_long" ? (
+              <textarea
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                rows={4}
+                value={String(answers[q.key] ?? "")}
+                onChange={(e) => setAnswers({ ...answers, [q.key]: e.target.value })}
+                placeholder="请输入答案"
+              />
+            ) : q.type === "single_choice" || q.type === "yes_no" ? (
+              <div
+                className={`mt-1 grid gap-2 ${
+                  q.layout === "horizontal" ? "grid-flow-col auto-cols-fr" : "grid-cols-1"
+                }`}
+                style={
+                  q.layout === "grid"
+                    ? { gridTemplateColumns: `repeat(${Math.max(1, Math.min(4, q.columns ?? 2))}, minmax(0, 1fr))` }
+                    : undefined
+                }
+              >
+                {(q.options ?? []).map((opt: QuestionnaireOption) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setAnswers({ ...answers, [q.key]: opt.value })}
+                    className={`rounded-lg border px-3 py-2 text-sm ${
+                      String(answers[q.key] ?? "") === String(opt.value)
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 text-gray-700"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            ) : q.type === "multi_choice" ? (
+              <div className="mt-1 grid grid-cols-1 gap-2">
+                {(q.options ?? []).map((opt: QuestionnaireOption) => {
+                  const selected = Array.isArray(answers[q.key]) && (answers[q.key] as string[]).includes(opt.value);
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        const prev = Array.isArray(answers[q.key]) ? (answers[q.key] as string[]) : [];
+                        const next = selected ? prev.filter((x) => x !== opt.value) : [...prev, opt.value];
+                        setAnswers({ ...answers, [q.key]: next });
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                        selected ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-700"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">{questionScale(q).left}</span>
+                  <span className="text-xs text-gray-400">{questionScale(q).right}</span>
+                </div>
+                <div className="mt-1 flex justify-between gap-1">
+                  {questionScale(q).values.map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setAnswers({ ...answers, [q.key]: v })}
+                      className={`flex h-10 min-w-10 items-center justify-center rounded-full px-2 text-sm font-medium transition-all ${
+                        Number(answers[q.key]) === v
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>

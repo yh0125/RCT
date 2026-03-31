@@ -13,6 +13,22 @@ type EnrollmentEmailConfig = {
   recipients: string[];
 };
 
+type GroupKey = "A" | "B" | "C";
+type RandomMethod = "complete_random" | "stratified_block" | "custom_ratio" | "custom_sequence";
+type RandomizationConfig = {
+  method: RandomMethod;
+  weights: { A: number; B: number; C: number };
+  sequence_items: Array<{ group: GroupKey; stratification?: string }>;
+  next_sequence_index: number;
+};
+
+const DEFAULT_RANDOMIZATION_CONFIG: RandomizationConfig = {
+  method: "stratified_block",
+  weights: { A: 1, B: 1, C: 1 },
+  sequence_items: [],
+  next_sequence_index: 0,
+};
+
 async function loadEnrollmentEmailConfig(): Promise<EnrollmentEmailConfig> {
   const fallback: EnrollmentEmailConfig = { enabled: false, recipients: [] };
   try {
@@ -85,6 +101,127 @@ async function sendEnrollmentEmail(input: {
   });
 }
 
+function normalizeRandomizationConfig(raw: unknown): RandomizationConfig {
+  const r = (raw ?? {}) as Partial<RandomizationConfig>;
+  const method = r.method;
+  return {
+    method:
+      method === "complete_random" ||
+      method === "stratified_block" ||
+      method === "custom_ratio" ||
+      method === "custom_sequence"
+        ? method
+        : DEFAULT_RANDOMIZATION_CONFIG.method,
+    weights: {
+      A: Number(r.weights?.A ?? 1) || 1,
+      B: Number(r.weights?.B ?? 1) || 1,
+      C: Number(r.weights?.C ?? 1) || 1,
+    },
+    sequence_items: Array.isArray(r.sequence_items)
+      ? r.sequence_items
+          .filter((x) => x?.group === "A" || x?.group === "B" || x?.group === "C")
+          .map((x) => ({ group: x.group, stratification: x.stratification || undefined }))
+      : [],
+    next_sequence_index: Number(r.next_sequence_index ?? 0) || 0,
+  };
+}
+
+async function loadRandomizationConfig(): Promise<RandomizationConfig> {
+  try {
+    const { data } = await supabase
+      .from("randomization_config")
+      .select("*")
+      .eq("id", 1)
+      .single();
+    if (data) return normalizeRandomizationConfig(data);
+  } catch {
+    // fallback
+  }
+  try {
+    const { data } = await supabase
+      .from("prompt_config")
+      .select("value")
+      .eq("key", "randomization_config")
+      .single();
+    if (data?.value) return normalizeRandomizationConfig(JSON.parse(data.value));
+  } catch {
+    // ignore
+  }
+  return DEFAULT_RANDOMIZATION_CONFIG;
+}
+
+async function saveRandomizationConfig(config: RandomizationConfig): Promise<void> {
+  try {
+    await supabase.from("randomization_config").upsert(
+      { id: 1, ...config, updated_at: new Date().toISOString() },
+      { onConflict: "id" }
+    );
+  } catch {
+    await supabase.from("prompt_config").upsert(
+      { key: "randomization_config", value: JSON.stringify(config), updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+  }
+}
+
+function weightedPick(weights: { A: number; B: number; C: number }): GroupKey {
+  const entries: Array<[GroupKey, number]> = [
+    ["A", Math.max(0, weights.A || 0)],
+    ["B", Math.max(0, weights.B || 0)],
+    ["C", Math.max(0, weights.C || 0)],
+  ];
+  const total = entries.reduce((s, [, w]) => s + w, 0);
+  if (total <= 0) return "A";
+  let r = Math.random() * total;
+  for (const [g, w] of entries) {
+    if (r < w) return g;
+    r -= w;
+  }
+  return "C";
+}
+
+async function pickByStratifiedSlot(modality: string): Promise<{ group: GroupKey; slotId: number }> {
+  const { data: slot, error: slotError } = await supabase
+    .from("randomization_log")
+    .select("*")
+    .eq("stratification", modality)
+    .eq("is_used", false)
+    .order("sequence_number", { ascending: true })
+    .limit(1)
+    .single();
+
+  if (slotError || !slot) {
+    throw new Error(`检查类型 "${modality}" 无可用随机化名额，请联系研究人员`);
+  }
+  return { group: slot.group_assignment as GroupKey, slotId: slot.id as number };
+}
+
+async function reserveStratifiedSlot(slotId: number, patientId: string) {
+  await supabase
+    .from("randomization_log")
+    .update({
+      is_used: true,
+      patient_id: patientId,
+      assigned_at: new Date().toISOString(),
+    })
+    .eq("id", slotId);
+}
+
+async function consumeCustomSequence(config: RandomizationConfig, modality: string): Promise<GroupKey> {
+  const seq = config.sequence_items;
+  if (!seq.length) throw new Error("自定义序列为空，请先在后台配置");
+  let idx = config.next_sequence_index || 0;
+  for (let i = idx; i < seq.length; i++) {
+    const item = seq[i];
+    if (!item.stratification || item.stratification === modality) {
+      config.next_sequence_index = i + 1;
+      await saveRandomizationConfig(config);
+      return item.group;
+    }
+  }
+  throw new Error("自定义序列已耗尽，请补充序列");
+}
+
 // GET /api/patients
 // ?code=P001               → by patient_code
 // ?reg_id=xxx&exam_date=yyyy-mm-dd → patient lookup by registration_id + exam_date
@@ -153,21 +290,24 @@ export async function POST(req: NextRequest) {
   }
   const patientCode = `P${String(nextNum).padStart(3, "0")}`;
 
-  // Find next randomization slot for this modality
-  const { data: slot, error: slotError } = await supabase
-    .from("randomization_log")
-    .select("*")
-    .eq("stratification", modality)
-    .eq("is_used", false)
-    .order("sequence_number", { ascending: true })
-    .limit(1)
-    .single();
-
-  if (slotError || !slot) {
-    return NextResponse.json(
-      { error: `检查类型 "${modality}" 无可用随机化名额，请联系研究人员` },
-      { status: 404 }
-    );
+  const randomConfig = await loadRandomizationConfig();
+  let assignedGroup: GroupKey = "A";
+  let reservedSlotId: number | null = null;
+  try {
+    if (randomConfig.method === "stratified_block") {
+      const slotPick = await pickByStratifiedSlot(modality);
+      assignedGroup = slotPick.group;
+      reservedSlotId = slotPick.slotId;
+    } else if (randomConfig.method === "complete_random") {
+      assignedGroup = weightedPick({ A: 1, B: 1, C: 1 });
+    } else if (randomConfig.method === "custom_ratio") {
+      assignedGroup = weightedPick(randomConfig.weights);
+    } else {
+      assignedGroup = await consumeCustomSequence(randomConfig, modality);
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "随机化分配失败";
+    return NextResponse.json({ error: msg }, { status: 404 });
   }
 
   // Create patient
@@ -180,7 +320,7 @@ export async function POST(req: NextRequest) {
       age: age ? Number(age) : null,
       gender: gender || null,
       modality,
-      group_assignment: slot.group_assignment,
+      group_assignment: assignedGroup,
       consent_given: true,
       education: education || null,
       health_status: health_status || null,
@@ -193,15 +333,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: patientError.message }, { status: 500 });
   }
 
-  // Mark randomization slot
-  await supabase
-    .from("randomization_log")
-    .update({
-      is_used: true,
+  if (reservedSlotId) {
+    await reserveStratifiedSlot(reservedSlotId, patient.id);
+  } else {
+    // 非分层方法仍写一条 randomization_log 以保留可追溯信息
+    await supabase.from("randomization_log").insert({
+      sequence_number: Date.now(),
+      block_number: 0,
+      stratification: modality,
+      group_assignment: assignedGroup,
       patient_id: patient.id,
       assigned_at: new Date().toISOString(),
-    })
-    .eq("id", slot.id);
+      is_used: true,
+    });
+  }
 
   // Optional notification email after successful enrollment
   try {
@@ -221,7 +366,7 @@ export async function POST(req: NextRequest) {
     console.error("[enrollment email] failed:", e);
   }
 
-  return NextResponse.json({ patient, slot });
+  return NextResponse.json({ patient, method: randomConfig.method, slot_id: reservedSlotId });
 }
 
 // PATCH /api/patients — update patient fields
@@ -232,10 +377,49 @@ const PATCHABLE_FIELDS = new Set([
 
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
-  const { id, ...rest } = body;
+  const { id, reassign_mode, reason, operator, ...rest } = body;
 
   if (!id) {
     return NextResponse.json({ error: "缺少患者 ID" }, { status: 400 });
+  }
+
+  const requestedGroup = rest.group_assignment;
+  if (requestedGroup === "A" || requestedGroup === "B" || requestedGroup === "C") {
+    const mode = reassign_mode === "rewrite" ? "rewrite" : "override";
+    const { data: oldPatient, error: oldError } = await supabase
+      .from("patients")
+      .select("group_assignment")
+      .eq("id", id)
+      .single();
+    if (oldError || !oldPatient) {
+      return NextResponse.json({ error: "患者不存在" }, { status: 404 });
+    }
+    const oldGroup = oldPatient.group_assignment as GroupKey;
+    const newGroup = requestedGroup as GroupKey;
+
+    const { error: uErr } = await supabase
+      .from("patients")
+      .update({ group_assignment: newGroup, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+
+    if (mode === "rewrite") {
+      await supabase
+        .from("randomization_log")
+        .update({ group_assignment: newGroup })
+        .eq("patient_id", id);
+    }
+
+    await supabase.from("group_assignment_audit").insert({
+      patient_id: id,
+      old_group: oldGroup,
+      new_group: newGroup,
+      mode,
+      reason: reason || null,
+      operator: operator || "admin",
+    });
+
+    return NextResponse.json({ success: true, reassigned: true, mode });
   }
 
   const updates: Record<string, unknown> = {
